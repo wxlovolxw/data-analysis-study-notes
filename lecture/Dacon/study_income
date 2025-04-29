@@ -1,0 +1,3626 @@
+인구 소득 예측 (중급)
+
+
+import pandas as pd
+
+train = pd.read_csv('train.csv')
+test = pd.read_csv('test.csv')
+submission = pd.read_csv('sample_submission.csv')
+
+데이터 확인
+
+display(train.head(5))
+display(test.head(5))
+display(submission.head(5))
+
+데이터 정보 확인
+-> 컬럼명, 결측값의 수, 데이터의 타입을 확인
+메모리 사용량을 파악하여 데이터 프레임 최적화에 도움(경험 필요)
+train.info()
+
+------------------------------------------------
+
+<class 'pandas.core.frame.DataFrame'>
+RangeIndex: 4440 entries, 0 to 4439
+Data columns (total 16 columns):
+ #   Column          Non-Null Count  Dtype 
+---  ------          --------------  ----- 
+ 0   ID              4440 non-null   object
+ 1   age             4440 non-null   int64 
+ 2   workclass       3977 non-null   object
+ 3   fnlwgt          4440 non-null   int64 
+ 4   education       4440 non-null   object
+ 5   education.num   4440 non-null   int64 
+ 6   marital.status  4440 non-null   object
+ 7   occupation      3972 non-null   object
+ 8   relationship    4440 non-null   object
+ 9   race            4440 non-null   object
+ 10  sex             4440 non-null   object
+ 11  capital.gain    4440 non-null   int64 
+ 12  capital.loss    4440 non-null   int64 
+ 13  hours.per.week  4440 non-null   int64 
+ 14  native.country  4293 non-null   object
+ 15  target          4440 non-null   int64 
+dtypes: int64(7), object(9)
+memory usage: 399.0+ KB
+
+16개의 피처와 4440개의 행으로 이루어져 있다.
+
+Non_Null Count를 통해 workclass, occupation, native.country 변수에 결측치가 존재한다는 것을 파악할 수 있다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+수치형 데이터의 기술 통계량 확인
+
+describe() 메서드를 사용하여 기술통계를 계산하고, T(transpose)를 통해 변수들이 행에 오도록 한다.
+-> 카운트, 평균, 최소값, 사분위수, 최대값을 확인할 수 있다.
+각 변수를 중심경향성, 분산 정도를 파악하고 이상치가 있는지도 대략적으로 확인할 수 있다.
+seaborn의 heatmap 함수를 통해 히트맵을 그린다.(패턴 파악에 용이)
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+train.describe()
+
+------------------------------------------------
+
+age	fnlwgt	education.num	capital.gain	capital.loss	hours.per.week	target
+count	4440.000000	4.440000e+03	4440.000000	4440.000000	4440.000000	4440.000000	4440.000000
+mean	38.779279	1.923122e+05	9.985360	1223.965090	69.511261	39.837387	0.240315
+std	14.011257	1.088622e+05	2.580624	8257.227782	357.876753	12.760011	0.427323
+min	17.000000	1.882700e+04	1.000000	0.000000	0.000000	1.000000	0.000000
+25%	28.000000	1.198022e+05	9.000000	0.000000	0.000000	38.000000	0.000000
+50%	37.000000	1.798670e+05	10.000000	0.000000	0.000000	40.000000	0.000000
+75%	48.000000	2.402272e+05	12.000000	0.000000	0.000000	45.000000	0.000000
+max	90.000000	1.455435e+06	16.000000	99999.000000	2603.000000	99.000000	1.000000
+
+description = train.describe().T
+
+fig, axs = plt.subplots(figsize=(11, 3))
+sns.heatmap(description, annot=True, fmt=".2f", cmap='coolwarm', linewidths=.5, ax=axs)
+axs.set_title('Descriptive Statistics Heatmap')
+plt.show()
+
+카운트 수는 결측치가 아닌 데이터의 수를 의미한다. 수치형 피처는 모두 카운트 수가 4440으로 결측치가 없는 것으로 보인다.
+fnlwgt 피처는 상대적으로 큰 표준편차를 가지고 있다. 이는 해당 피처의 값들이 평균에서 퍼져있음을 의미한다.
+
+fnlwgt와 capital.gain 피처는 최댓값이 큰 편이므로, 이상치가 존재할 가능성이 있다.
+hours.per.week 피처의 최소값이 1로 나타나는데, 이는 이상치의 존재 가능성을 의미한다.
+
+이러한 결과를 고려하여 결측치의 처리, 이상치의 처리, 피처 스케일링과 같은 전처리가 필요할 것이다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+범주형 데이터의 기술 통계량 확인
+
+train_drop = train.drop(['ID'],axis = 1)
+
+train_drop.describe(include=['O']).T / include=['O']는 object 타입을 포함시키겠다는 의미이다.(범주형)
+
+------------------------------------------------
+
+count	unique	top	freq
+workclass	3977	8	Private	2962
+education	4440	16	HS-grad	1452
+marital.status	4440	7	Married-civ-spouse	2063
+occupation	3972	13	Craft-repair	543
+relationship	4440	6	Husband	1790
+race	4440	5	White	3761
+sex	4440	2	Male	2975
+native.country	4293	40	United-States	3928
+
+workclass에는 8개의 항목과 463개의 결측치, 최빈값은 Private 이며 그 빈도 수가 2962인 것으로 나타났다.
+또한 occupation은 13개의 항목과 468개의 결측치, 최빈값은 Craft-repair이며 그 빈도 수가 543이다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+범주형 피처(feature) 고유값 출력
+
+zip 함수를 통해 categorical_Eng와 categorical_Kor 리스트의 각 요소를 쌍으로 묶어서 순회한다.
+
+categorical_Eng = ['workclass', 'education', 'marital.status', 'occupation', 'relationship', 'race', 'sex', 'native.country']
+categorical_Kor = ['근로 형태', '교육', '결혼 상태', '직업', '가족 관계', '인종', '성별', '국적']
+
+각각의 피처들에 대해서 고유한 값들에 어떤 것들이 있는지 리스트의 형태로 반환해보면
+
+for Eng, Kor in zip(categorical_Eng, categorical_Kor):
+    unique_values = train[Eng].unique().tolist()
+    print('\n {0} ({1})\n'.format(Eng, Kor), unique_values)
+
+------------------------------------------------
+
+workclass (근로 형태)
+ ['Self-emp-not-inc', 'Private', nan, 'Local-gov', 'Self-emp-inc', 'State-gov', 'Federal-gov', 'Never-worked', 'Without-pay']
+
+ education (교육)
+ ['Some-college', 'Bachelors', 'HS-grad', '11th', 'Masters', 'Assoc-voc', '9th', '7th-8th', '10th', 'Doctorate', 'Assoc-acdm', 'Preschool', '5th-6th', '12th', 'Prof-school', '1st-4th']
+
+ marital.status (결혼 상태)
+ ['Married-spouse-absent', 'Never-married', 'Married-civ-spouse', 'Divorced', 'Separated', 'Widowed', 'Married-AF-spouse']
+
+ occupation (직업)
+ ['Craft-repair', 'Exec-managerial', 'Other-service', 'Adm-clerical', 'Farming-fishing', nan, 'Sales', 'Transport-moving', 'Prof-specialty', 'Machine-op-inspct', 'Tech-support', 'Protective-serv', 'Handlers-cleaners', 'Priv-house-serv']
+
+ relationship (가족 관계)
+ ['Not-in-family', 'Unmarried', 'Wife', 'Husband', 'Own-child', 'Other-relative']
+
+ race (인종)
+ ['White', 'Black', 'Asian-Pac-Islander', 'Amer-Indian-Eskimo', 'Other']
+
+ sex (성별)
+ ['Male', 'Female']
+
+ native.country (국적)
+ ['United-States', nan, 'Mexico', 'Guatemala', 'Puerto-Rico', 'Columbia', 'China', 'Jamaica', 'Philippines', 'Thailand', 'Portugal', 'Poland', 'Trinadad&Tobago', 'India', 'Haiti', 'Vietnam', 'Canada', 'Taiwan', 'Germany', 'Honduras', 'England', 'Dominican-Republic', 'France', 'Laos', 'El-Salvador', 'Japan', 'Ireland', 'South', 'Yugoslavia', 'Hungary', 'Peru', 'Cuba', 'Ecuador', 'Italy', 'Cambodia', 'Greece', 'Nicaragua', 'Iran', 'Outlying-US(Guam-USVI-etc)', 'Hong', 'Scotland']
+ 
+의 결과를 얻었다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+데이터 불러오기 
+
+import pandas as pd
+
+df = pd.read_csv('train.csv')
+df = df.drop('ID', axis=1)
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+시각화에 필요한 라이브러리(Library) 불러오기
+
+-> 복잡한 데이터 셋을 효과적으로 이해하고 분석하는데 있어, 시각적 요소를 활용하면 수많은 정보를 명확하고 직관적으로 전달할 수 있다. 데이터의 패턴, 트렌드, 이상치, 상관관계를 빠르게 식별할 수 있다.
+
+- EDA(탐색적 데이터 분석)
+원시 데이터를 조사하는 방법론으로, 통계적 그래픽과 시각화 도구를 사용하여 수행.
+데이터의 구조와 패턴을 식별하고, 특이한 점이나 예외 값을 찾으며 데이터에 대한 직관을 얻는다.
+
+시각화 도구와 라이브러리를 활용하여 차트와 그래프를 생성하고, 이를 통해 데이터의 분포, 중심경향, 변동성 등을 직관적으로 확인하여 정확한 분석과 예측을 가능하게 한다.
+
+이 과정중에 데이터의 품질과 무결성에 대한 중요한 통찰력을 얻을 수 있다.
+누락값, 이상치 또는 가은 이슈들을 식별하여 데이터 전처리 과정에서 처리할 수 있으며 이는 분석 결과의 신뢰성과 정확성이 향상된다.
+
+matplotlib과 seaborn을 import. seaborn은 matplotlib을 기반으로 효과적인 시각화 자료를 생성가능.
+그래프 스타일은 ggplot으로 설정하여 명료하고 이해하기 쉬운 그래프 생성
+한글 폰트 설정으로 라벨과 제목등에 적용
+코드 실행시 발생할 수 있는 불필요한 경고 메세지 무시
+
+# seaborn 및 matplotlib.pyplot 라이브러리를 가져옵니다.
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+# 불필요한 경고 메시지를 무시합니다.
+import warnings
+warnings.filterwarnings("ignore")
+
+# 그래프 스타일을 'ggplot'으로 설정합니다.
+plt.style.use("ggplot")
+
+# 한글 폰트를 사용하기 위해 필요한 코드입니다.
+import matplotlib.font_manager as fm
+
+# 'NotoSansKR-Regular.otf' 파일을 사용하여 한글 폰트를 지정하고, 폰트 매니저에 추가합니다.
+fe = fm.FontEntry(fname='NotoSansKR-Regular.otf', name='NotoSansKR')
+fm.fontManager.ttflist.insert(0, fe)
+plt.rc('font', family='NotoSansKR')
+
+------------------------------------------------
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+Target의 분포
+
+이번 분석에서 가장 중요한 소득 수준(target)에 따른 데이터 분포를 시각화하여 확인하는 것이 매우 중요하다.
+
+데이터의 시각화를 통해 소득 수준에 따른 데이터 분포를 보면 어떤 소득 수준이 주로 나타나는지, 클래스 간 불균형이 있는지 등을 파악할 수 있다.
+
+클래스의 분포를 통해 불균형한 클래스 분포를 감지하여 조치를 취할 수 있다. 이는 모델 학습 결과가 편향되는 것을 방지할 수 있다.
+
+모델을 평가할 때, 클래스별 정확도, 정밀도, 재현율 등의 지표를 계산하는 데에도 클래스 분포 정보가 필요하다. 시각화를 통해 각 클래스의 데이터 수를 파악하면 모델 평가를 준비하는 데 도움이 된다.
+
+시각화는 또한 의사결정에 도움이 된다. 데이터 분포를 보고 소득 수준에 따라 어떤 특성들이 중요한지, 어떤 클래스가 더 예측하기 어려운지 등을 판단할 수 있다. 이를 통해 모델 개선 또는 추가 조치를 취할 수 있다.
+
+categories = df["target"].value_counts().index / value_counts().index 를 통해 target 열의 고유값을 categories에 할당
+values = df["target"].value_counts().values / target열에서 각 카테고리의 빈도수를 value_counts().values로 할당
+
+plt.figure(figsize=(5,5))
+
+pie_chart = plt.pie(x=values,
+                    labels=categories,
+                    autopct='%.2f%%', / 백분률 표시를 어느 단위까지 할것인지 지정
+                    shadow=True, / 그림자 효과
+                    startangle=40, / 차트의 시작 각도
+                    wedgeprops=dict(width=0.75), / 중심에 구멍
+                    textprops=dict(color="white", fontsize=14, weight="bold"))
+
+plt.legend(title="target", title_fontsize=12, loc='best', fontsize=12)
+plt.title('Target Distribution', size = 15)
+plt.show()
+
+------------------------------------------------
+
+결과 : target 변수는 인구의 소득 수준을 나타내며, 두가지 카테고리값(0/1)을 가집니다.
+각 카테고리 값은 소득이 임계값인 5만 달러를 넘는지 여부를 나타냅니다.
+
+0 : 75.97, 1 : 24.03
+
+0 - 소득이 5만 달러 미만인 경우
+1 - 소득이 5만 달러 이상인 경우
+
+결과 클래스가 1인 경우가 0인 경우에 비해 3배 가량 많은 것으로 나타났다
+
+이러한 클래스의 불균형은 모델 학습에 문제를 일으킬 수 있다.
+- 편향성 증가 되어 오버피팅의 위험성이 있고, 이는 분류 성능의 저하로 이어질 수 있다.
+
+-> 이러한 문제를 해결하기 위해 리샘플링으로 다수 모델을 줄이는 언더샘플링/ 소수 모델을 늘리는 오버샘플링으로 해결할 수 있다.
+
+또한 모델 평가 지표를 선택할 때에도, 불균형한 데이터에서는 정확도만을 선택하지 않고 정밀도와 재현율, F1등의 다른 지표를 고려해야 한다.
+
+종합적으로 클래스의 불균형 문제는 데이터 분석에서 매우 중요한 고려사항이다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+범주형 feature의 분포
+
+target의 분포를 확인하였고, 그 다음 각 feature의 분포를 확인해보자.
+pandas와 seaborn을 사용하여 범주형(categorical)열의 분포를 시각화 해보자.
+
+categorical_columns = df.select_dtypes(include=['object']).columns
+# select_dtypes는 데이터프레임 내의 열을 데이터 유형에 따라 선택할 수 있다. include=['object']를 통해 object의 유형을 선택할 수 있다.
+
+fig, axes = plt.subplots(4, 2, figsize=(13,13))
+fig.suptitle('Distribution of Categorical Features')
+# 4 * 2크기의 서브 플랏을 그리는 그리드를 생성한다.
+# fig는 전체그림, axes는 서브플랏을 의미한다.
+
+for i, col in enumerate(categorical_columns):
+    sns.countplot(y=col, data=df, ax=axes[i//2, i%2])
+    axes[i//2, i%2].set_title(f'Distribution of {col}')
+    axes[i//2, i%2].set_xlabel('')
+# i//2는 행, i%2는 열을 나타낸다.
+
+plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+plt.show()
+# tight_layout은 그림의 레이아웃을 조정한다. 순서대로 왼쪽, 아래쪽, 오른쪽, 위의 여백을 나타낸다.
+
+------------------------------------------------
+
+workclass
+private 클래스의 빈도가 가장 높다. self-emp-not-inc 및 self-emp-inc 자영업자의 비율도 상당히 높다.
+state-gov, local-gov, federal-gov 국가, 지방 및 연방 정부에서 근무하는 사람들도 있지만 비율이 낮다.
+without-pay, never-worked 이 두 클래스는 매우 낮은 빈도수를 갖고 있다.
+
+education
+hs-gard의 빈도가 가장 높다. 대부분의 인구가 최소한 고등교육을 받았음을 의미한다.
+some-college와 bachelors의 비율도 꽤 높다. 많은 사람들이 일부 대학교육/ 학사 학위를 취득했음을 의미한다.
+masters, doctorate, prof-school을 가진 사람은 상대적으로 적은 비율을 차지하고 있다.
+
+martial status
+married-civ-spouse의 비율이 높다. 많은 사람들이 현재 결혼해있음을 의미한다.
+never-married의 비율도 꽤 높다. 이는 미혼인 사람의 비율을 나타낸다.
+divorced는 이혼한 사람의 비율을 보여주며, 상대적으로 더 적은 비율을 차지하고 있다.
+
+occupation
+prof-speciality와 craft-repair가 상당한 비율을 차지하고 있다. 즉 전문/수공예 분야에서 일하는 사람이 많다.
+exec-managerial 카테고리도 높은 비율을 차지하고 있다. 이는 경영 관련 직종에서 일하는 사람의 비율을 나타낸다.
+
+relationship
+husband 카테고리가 가장 높다. 이는 데이터 셋의 개인들 중에서 많은 수가 남편의 역할을 하고 있음을 의미한다.
+not-in-family와 own-child 카테고리의 비율도 높다. 이는 혼자 사는 비율이나, 다른 비가족 구성원과의 동거가 상당히 높고, 자녀의 역할을 하고 있는 사람이 많다는 것을 알려준다.
+
+race
+white 인종이 대다수를 차지하고 있다. 주로 백인 인구로 구성된 데이터임을 나타낸다.
+다른 인종 카테고리들은 상대적으로 적은 비율을 차지하고 있다.
+
+sex
+남성이 여성보다 더 많은 비율을 차지하고 있다.
+여성의 비율도 상당하지만 남성에 비해 적다.
+
+native country
+united-state가 압도적으로 높은 빈도를 보인다. 대부분이 미국 사람임을 나타낸다.
+미국 이외의 국가들은 매우 적은 비율을 보이고 있다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+수치형 feature의 분포
+
+numeric_columns = df.select_dtypes(include=['int','float']).columns[:-1]
+# int(정수)와 float(부동소수점) 데이터 유형을 가지는 열을 선택
+
+fig, axes = plt.subplots(3, 2, figsize=(13,13))
+fig.suptitle('Distribution of numerical Features')
+
+for i, col in enumerate(numeric_columns):
+    sns.histplot(df[col], kde=True, bins=30, ax=axes[i//2, i%2])
+    axes[i//2, i%2].set_title(f'Distribution of {col}')
+    axes[i//2, i%2].set_xlabel('')
+# 카테고리형과는 다르게 히스토그램으로 확인. kde(커널 밀도 추정 그래프)를 통해 그래프의 연속적인 변화 패턴을 파악
+
+plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+plt.show()
+
+------------------------------------------------
+
+age의 분포는 주로 20-50, 고령층은 그 수가 적다
+
+fnlwgt(final weight) 주로 0-400,000 사이에 집중되어 있으며 일부 극단값이 존재한다.
+왼쪽에 치우친 분포를 하고 있다.
+
+education.num은 대부분 8-13 사이에 분포하고 있으며 이는 고등학교 졸업 이상의 교육을 받은 사람을 의미한다.
+더 높은 수준의 교육을 받은 사람은 상대적으로 더 적게 나타난다.
+
+capital.gain에서 대부분의 사람들의 자본 이득은 0에 가깝게 분포한다. 일부는 높은 자본 이득을 보이지만 전체에서 매우 소수에 해당한다.
+
+capital.loss도 capital.gain과 마찬가지로 대부분의 값이 0에 집중되어 있다.
+
+hours.per.week 에서 대부분의 사람들은 주 30-40시간 근무하며 이는 표준 근무시간에 해당한다.
+일부는 40시간 이상이며 이는 초과근무에 해당한다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+수치형 feature의 boxplot(상자 수염 플롯)
+
+boxplot은 데이터의 중앙값, 분포, 이상치를 한눈에 볼 수 있는 시각화 방법이다.
+중앙값 - 데이터를 오름차순으로 정렬했을 때, 중앙에 위치한 값이다
+사분위수 - 상단과 하단은 각각 1사분위수과 3사분위수를 나타낸다
+이상치 - boxplot의 바깥에 위치한 점들은 이상치로 간주된다. 일반적으로 데이터 분포에서 벗어난 값들을 나타낸다.
+범위 - boxplot의 수염은 데이터의 전체 범위를 나타내며, 일반적으로 1.5 * IQR 이내의 값들을 포함한다. - IQR(Interquartile Range)
+분포 - boxplot의 상자의 분포는 수염의 길이를 통해 데이터의 분포를 대략적으로 파악할 수 있다.
+상자의 높이가 크면 데이터가 넓게 분포해 있는 것이고, 수염의 길이가 길면 범위가 넓은 것이다.
+
+fig, axes = plt.subplots(len(numeric_columns), 1, figsize=(10, 8))
+fig.suptitle('Boxplot of Numeric Features')
+
+for i, col in enumerate(numeric_columns):
+    sns.boxplot(x=df[col], ax=axes[i])
+    axes[i].set_title(f'Boxplot of {col}')
+    axes[i].set_xlabel('')
+
+plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+plt.show()
+
+------------------------------------------------
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+다중 공선성(VIF) 계산을 통한 피처 상관성 분석
+
+- 회귀 분석에서 독립 변수들 간에 높은 상관관계가 존재할 때 발생하는 문제이다.
+다중 공선성이 있으면, 회귀 모델의 계수 추정치가 불안정해 지고, 표본에 따라 크게 변할 수 있다.
+변수들 간에 높은 상관관계가 있으면, 각 변수의 개별 효과를 정확하게 구분하기 어려워진다.
+
+상관 행렬 확인을 통해, 독립 변수들 간의 상관 행렬을 확인하여, 높은 상관관계를 가진 변수를 식별할 수 있다.
+VIF(variance inflation factor) 계산은 각 독립 변수를 다른 독립 변수들로 회귀 시켰을 때의 R^2 값에 기반한다.
+VIF = 1 / ( 1 - R^2 )
+(R^2 : 독립변수 i를 다른 독립변수들로 회귀 분석했을때의 결정계수)
+VIF값이 10 이상이면, 해당 변수는 다중 공선성 문제가 있을 가능성이 높다.
+VIF = 1 : 해당 변수는 다른 변수들과 전혀 상관성이 없음
+VIF <= 5 : 다중 공선성이 약하거나 문제 없음
+VIF > 5 : 다중 공선성이 존재할 가능성이 있음(주의)
+VIF > 10 : 심각한 다중 공선성이 있음(모델 재구성 필요)
+
+해결 방법으로는 변수 제거/ 변수 변환(차원축소)/ 데이터 추가 등의 방법이 있다.
+
+feature와 feature의 관계를 확인하는 이유
+- 데이터 내부의 상호작용 및 의존성을 파악할 수 있다.
+모델링 단계에서 변수 선택 및 특성 공학을 수행하는 데 유용한 통찰력을 얻을 수 있다.
+
+import numpy as np
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+
+# 함수의 정의
+def calculate_vif(df):
+    vif_data = pd.DataFrame()
+    vif_data["variable"] = df.columns
+    vif_data["VIF"] = [variance_inflation_factor(df.values, i) for i in range(df.shape[1])]
+    return vif_data
+# 빈 데이터 프레임을 생성하고, variable 컬럼에 df의 칼럼명을 저장한다.
+# for문을 통해 데이터프레임의 열수(독립변수의 수)만큼 반복하여, 인덱스 i번째 독립 변수의 VIF를 계산합니다.
+
+
+numeric_df = df.select_dtypes(include=['int','float']).dropna()
+vif = calculate_vif(numeric_df)
+vif
+# 정수형과 실수형 변수만 선택한 후, dropna() 함수를 통해 결측값이 존재하는 행을 모두 제거한다.
+# 선택한 수치형 변수들에 대해서 정의한 calculate_vif 함수에 사용하여 VIF값을 계산한다.
+
+------------------------------------------------
+
+    variable	VIF
+0	age	6.865560
+1	fnlwgt	3.687539
+2	education.num	11.018223
+3	capital.gain	1.084950
+4	capital.loss	1.064245
+5	hours.per.week	8.723676
+6	target	1.563385
+
+age - 6.8로 다른 변수들과 중간 수준의 상관관계를 가지고 있다.
+fnlwgt - 3.6으로 다른 변수들과의 관계가 낮다. 다중 공선성 문제는 없어 보인다.
+education.num - 11로 다른 변수와 높은 상관관계를 가지고 있다. 다중 공선성 문제가 있음을 알 수 있다.
+capital.gain과 capital.loss는 각각 1.08과 1.06로 다른 변수들과의 상관관계가 거의 없다.
+hours.per.week는 8.7로 다른 변수들과 중간 수준의 상관관계를 갖는다. 주의할 필요가 있다.
+target은 1.5로 다른 변수들과의 상관관계가 낮다.
+
+education.num은 다중 공선성 문제를 가질 가능성이 높고, age와 hours.per.week도 주의해야 한다.
+이를 해결하기 위해 변수들을 제거하거나 변환을 고려해야 할 수도 있다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+다중 공선성 확인을 위한 'education' 피처 시각화
+
+eductaion.num의 VIF가 높게 나온 이유를 찾기 위해, 다른 피처들 과의 관계를 탐색한다.
+education은 교육수준의 명칭이, education.num은 숫자로 교육 수준이 표시되어 있다.
+
+# 그림 크기 설정, ncols를 통해 서브플랏의 열 수를 지정한다.
+fig, axs = plt.subplots(figsize=(12, 4), ncols=2)
+
+orders = ['Preschool','1st-4th','5th-6th','7th-8th','9th','10th','11th','12th',
+'HS-grad','Some-college','Assoc-acdm','Assoc-voc','Bachelors','Masters','Prof-school','Doctorate']
+
+# 첫 번째 subplot: education 카테고리 시각화
+sns.countplot(x="education", data=df, order=orders, ax=axs[0])
+axs[0].set_xticklabels(labels = orders, rotation=45)
+axs[0].set_title('education')
+# set_xticklabels를 통해 x축 눈금 레이블을 설정할 수 있다.
+
+# 두 번째 subplot: education.num 카테고리 시각화
+sns.countplot(x="education.num", data=df, ax=axs[1])
+axs[1].set_title('education.num')
+
+plt.tight_layout()
+plt.show()
+
+------------------------------------------------
+
+시각화 해본 결과, eductaion과 education.num 두 그래프의 형태가 같다. 즉 같은 정보를 다른형태로 나타낸 것이다.
+이는 다중 공선성의 근거가 될 수 있기 때문에, 둘 중 하나의 변수만을 선택하여 모델에 포함시키는 것이 바람직하다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+교육 수준(education.num)에 따른 직업(occupation) 분포
+
+다양한 직업군에 대해 각각의 교육수준 분포를 시각화 해서 확인해 보자.
+education.num은 교육 수준을 숫자로 표현한 것으로, 높은 값이 더 높은 교육 수준을 의미한다.
+
+plt.figure(figsize=(12, 6))
+
+ax = sns.countplot(data=df, x="occupation", hue="education.num")
+plt.xticks(rotation=45)
+plt.title("Count of Occupation by Education Number")
+
+plt.legend(title="Education Number", loc="upper right")
+plt.show()
+# 그래프의 legent()함수를 통해 matplotlib에서 그래프에 범례를 추가한다.
+title은 범례의 제목, loc은 범례의 위치를 지정한다.
+n
+------------------------------------------------
+
+직업군 별 교육 수준 분포 : 대부분의 직업군에서 특정 교육 수준이 두드러지게 많다. exec_managerial, prof-specialty 는 더 높은 education.num 값을 가진 사람이 많다.
+
+handlers-cleaners와 craft-repair같은 일부 직업군은 교육 수준이 다양하게 분포한다.
+
+많은 직업군에서 교육 수준이 education.num이 9인 경우가 많다.
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+성별(sex)에 따른 주당 근로시간(hours.per.week) 분포
+
+성별에 따른 주당 근로시간의 분포를 확인해 본다.
+
+plt.figure(figsize=(10,5))  
+
+# unique()를 통해 피처에서 고유한 값을 가져온다.
+for sex in df['sex'].unique():
+    axs = sns.distplot(df[df['sex'] == sex]['hours.per.week'], label=sex)
+
+plt.legend()
+plt.title("Distribution of hours.per.week by Sex")
+plt.show()
+
+------------------------------------------------
+
+남성의 분포는 여성의 분포보다 넓게 퍼져있으며, 주당 더 많은 시간을 일하는 경향이 있다.
+둥앙값은 모두 40시간 근처에 위치하고 있다.
+
+남성의 분포보다 여성의 분포가 더 뾰족한 형태를 보이며, 여성의 특정 주당 근무 시간에 집중되어 있음을 의미한다.
+
+극단값은 남성이 더 많이 분포하는 것으로 관찰된다. 일부 남성은 주당 60시간 이상 일하는 반면, 여성은 그렇지 않을 것으로 보인다.
+
+여성의 근무시간은 주로 30-40, 남성은 40-50에 분포하고 있다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+변수 간 상관 관계 시각화
+
+각 피처와 타겟 변수 사이에 어떤 관계가 있는지 살펴보자
+
+피처의 값이 타겟 변수에 어떤 영향을 주는지, 특정 피처값의 변화가 타겟 변수의 변화를 어떻게 유발하는지 파악할 수 있다.
+
+먼저, 각 범주형 피처에 대해서 타겟 변수와의 관계를 시각화하여, 타겟 변수의 값에 따라 각 범주형 피처의 분포가 어떻게 달라지는지 관찰해보자.
+
+상관 계수의 값은 -1부터 1의 값을 가지며, 
+1 : 완벽한 양의 상관 관계
+0 : 선형 상관 관계가 없음
+-1 : 완벽한 음의 상관 관계
+
+밝은 색은 강한 양의 상관 관계, 어두운 색은 강한 음의 상관 관계를 나타낸다.
+
+# corr() 메소드를 사용하여 수치형 특성 간의 상관계수 행렬을 계산한다.
+corr_matrix = df.corr()
+
+# heatmap 함수를 사용하여 상관계수 행렬을 시각화 한다.
+# 첫번째 인자로 corr_matrix를 전달하여 상관계수 행렬을 히트맵으로 표시한다.
+# annot = True로 하면 각 셀에 계수 값을 표시한다. 소숫점 두 번째 자리까지 표시한다.
+axs = sns.heatmap(corr_matrix, annot=True, fmt=".2f")
+plt.title('Correlation Matrix')
+plt.show()
+
+------------------------------------------------
+
+education.num과 target은 0.35의 상관계수를 가지며, 교육수준이 높을수록 소득이 50K를 초과할 가능성이 높다는 것을 나타낸다.
+
+hours.per.week와 target은 약 0.23의 상관계수로, 마찬가지로 주당 근무 시간이 많을수록 소득이 50K를 초과할 가능성이 높다는 것을 나타낸다.
+
+age와 target도 0.24의 상관계수를 가진다.
+
+capital.gain 및 capital.loss도 target과 양의 상관관계를 갖지만, 피처의 값들이 대부분 0이므로 상관계수가 실제 관계를 정확하게 반영하지 않을 수 있다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+범주형 변수와 소득(target)의 분포
+
+workclass - Target : sns.countplot을 사용하여 workclass 별 target 분포를 그린다.
+
+occupation - Target : crosstab을 사용하여 occupation과 target의 교차표를 생성, 행을 기준으로 정규화 하고
+sns.heatmap을 사용하여 교차표를 히트맵으로 시각화 한다.
+
+race - Target : 위와 유사하게 히트맵을 생성하여 시각화 한다.
+
+fig, axes = plt.subplots(3, 2, figsize=(20, 18))
+fig.suptitle('Categorical Features vs Target Visualization')
+
+# workclass vs Target (Grouped Bar Plot)
+# 그룹화된 막대 그래프는 서로 다른 범주들 간의 비교를 가능하게 하는 막대 그래프이다.
+각 막대는 서로 옆에 배치되어, 하나의 축을 따라 여러 범주의 값을 표시한다.
+(범주형 데이터 간의 비교시에 사용된다. ex) 서로 다른 직업군에 따른 소득 분포)
+
+sns.countplot(x='workclass', hue='target', data=df, ax=axes[0, 0])
+axes[0, 0].set_title('workclass vs Target')
+axes[0, 0].tick_params(axis='x', rotation=45)
+
+# relationship vs Target (Grouped Bar Plot)
+sns.countplot(x='relationship', hue='target', data=df, ax=axes[0, 1])
+axes[0, 1].set_title('relationship vs Target')
+axes[0, 1].tick_params(axis='x', rotation=45)
+
+# education vs Target (Stacked Bar Plot)
+# 누적 막대 그래프는 막대의 각 세그먼트가 전체 막대 내에서 특정 범주의 비율을 나타낸다.
+전체 막대의 길이가 전체의 값, 개별 세그먼트는 전체 중 일부분을 나타낸다.
+전체적인 크기를 유지하면서 범주 내의 세부적인 구성을 보여줄 때 유용하다.
+ex) 전체 인구중 각 연령대별 비율이나, 총 매출 중 각 제품 카테고리별 매출의 비율
+
+education_target_counts = df.groupby(['education', 'target']).size().unstack()
+
+education_target_counts.plot(kind='bar', stacked=True, ax=axes[1, 0])
+axes[1, 0].set_title('education vs Target')
+axes[1, 0].set_ylabel('Count')
+
+# sex vs Target (Stacked Bar Plot)
+sex_target_counts = df.groupby(['sex', 'target']).size().unstack()
+
+sex_target_counts.plot(kind='bar', stacked=True, ax=axes[1,1])
+axes[1,1].set_title('sex vs Target')
+axes[1,1].set_ylabel('Count')
+
+# occupation vs Target (Heatmap)
+# 히트맵은 데이터값을 색상의 강도 또는 그라데이션으로 시각화 하는 도구.
+두 개의 범주형 변수 간의 관계를 생상으로 차이를 통해 보여준다.
+주로 상관관계, 패턴, 트렌드를 시각화 하는데 사용한다.
+ex) 시간대별 웹사이트 트래픽의 변화, 직업군 별 소득 수준의 분포
+
+occupation_crosstab = pd.crosstab(df['occupation'], df['target'], normalize='index')
+sns.heatmap(occupation_crosstab, annot=True, fmt='.2f', cmap="YlGnBu", ax=axes[2, 0])
+axes[2, 0].set_title('occupation vs Target')
+
+# race vs Target (Heatmap)
+race_crosstab = pd.crosstab(df['race'], df['target'], normalize='index')
+sns.heatmap(race_crosstab, annot=True, fmt='.2f', cmap="YlGnBu", ax=axes[2, 1])
+axes[2, 1].set_title('race vs Target')
+
+plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+plt.show()
+
+------------------------------------------------
+
+workclass - target(grouped bar)
+대부분의 사람들이 private에 속해있고, 소득이 낮은 경우가 많다.
+
+relationship - target(grouped bar)
+husband 상태에서 소득 높은 사람들의 비율이 높다.
+
+education - target(stacked bar)
+높은 교육 수준일 때, 소득이 높은 사람들의 비율이 더 높은 것으로 보인다.
+
+sex - target(stacked bar)
+남성이 여성에 비해 소득이 높은 비율이 높은 것으로 보인다.
+
+occupation - target(heatmap)
+exec-managerial과 prof-specialty 에서 소득이 높은 사람의 비율이 높다.
+
+race - target(heatmap)
+모든 인종에서 소득이 낮은 사람들이 더 많지만, white와 asian-pac-islander 에서 소득이 높은 사람들의 비율이 높다.
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+수치형 변수와 소득(target)의 분포: 히스토그램 및 바이올린 플롯
+
+fig, axs = plt.subplots(len(numeric_columns), 2, figsize=(12, 15))
+fig.suptitle('Numerical Features vs Target')
+
+for i, col in enumerate(numeric_columns):
+
+    # 히스토그램(Histogram)
+    sns.histplot(df, x=col, hue='target', multiple="stack", ax=axs[i, 0], kde=True, element="bars")
+    axs[i, 0].set_title(f'Histogram of {col}')
+    # multiple을 stack으로 설정하면, 서로 다른 타겟 값에 대한 히스토그램을 겹쳐서 표시한다. kde는 커널 밀도 추정치,
+    element는 bars, step, polt 세 종류가 있다.
+    연속 데이터의 분포를 시각화 한다. 데이터를 일정한 간격의 구간인 바로 나누고, 각 구간에 속한 데이터포인트의 수를 표현한다.
+    주로 데이터의 분포, 중심 경향성, 이상치를 시각화 한다. 각 바의 높이는 데이터 포인트의 수이다.
+    
+    # 바이올린 플롯(Violin Plot)
+    sns.violinplot(x='target', y=col, data=df, ax=axs[i, 1])
+    axs[i, 1].set_title(f'Violin Plot of {col}')
+    # 데이터의 분포와 밀도를 시각화 하는데 사용된다.
+    상자그림과 커널밀도 추정을 결합한 형태로 분포를 자세히 표현한다.
+    가운데 상자 그림은 중앙값과 사분위수를 표시하며, 위아래로 확장된 커널 밀도 추정 곡선은 데이터의 분포를 나타낸다.
+    데이터의 분포와 중심 경향성을 시각적으로 파악하는데 사용, 다른 카테고리 변수에 따른 데이터 분포의 비교도 가능.
+
+plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+plt.show()
+
+------------------------------------------------
+
+age 
+    히스토그램 - 나이가 증가함에 따라 50K를 버는 사람의 비율은 증가한다. 20-30대 초반에는 50K 이상을 벌어들이는 사람의 수가 적지만, 나이가 증가함에 따라 그 비율이 증가한다.
+    바이올린 - 바이올린 플랏도 비슷하다. 50K 이상을 벌어들이는 그룹은 나이가 더 많은 분포를 보이고 있다.
+    
+fnlwgt
+    히스토그램 - 두 그룹간 큰 차이가 보이지 않는다. 대부분의 사람들은 낮은 fnlwgt값을 갖고 있다.
+    바이올린 - 두 그룹간 큰 차이가 없다.
+    
+education.num
+    히스토그램 - 교육수준이 높은 사람들이 50K 이상을 벌 가능성이 높다.
+    바이올린 - 교육수준이 높을수록 50K 이상을 벌어들이는 비율이 높다.
+    
+capital-gain
+    히스토그램 - 대부분 0의 값을 가지며, 50K 이상을 벌어들이는 사람들이 더 높은 capital_gain을 가지는 경향을 보인다.
+    바이올린 - 비슷한 패턴을 보인다.
+
+capital-loss
+    히스토그램 - 대부분 0의 값을 가지며, 몇몇 사람이 높은 capital-loss 값을 갖는다.
+    바이올린 - capital-gain과 유사한 패턴을 보인다.
+    
+hours-per-week
+    히스토그램 - 50K 이상을 벌어들이는 사람은 일두일에 더 많은 시간을 일하는 경향이 있다.
+    바이올린 - 근무시간이 길수록 50K 이상 벌어들이는 비율이 높다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+주당 근로시간 및 대상(Target)에 따른 피처 간 관계 시각화
+
+sns.pairplot 은 데이터 프레임 내 모든 수치형 변수들 간의 관계를 산점도로 나타낸다. hue 인자를 통해 특정 범주형 변수에 따라 다른 색상으로 그룹화 하여 시각화 한다.
+
+산점도 : 두 변수 사이의 상관 관계를 추측할 수 있다. ex) 대각선으로 정렬되어 있다면 강한 상관관계가 있다.
+
+히스토그램(대각선) : 각 변수의 분포를 보여준다. 중심 경향성, 분산, 왜도를 파악할 수 있다.
+
+axs = sns.pairplot(data=df, hue="target", height=2)
+plt.show()
+
+------------------------------------------------
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+나이(age) 및 교육 수준(education)에 따른 분포
+
+나이와 교육 수준피처에 따른 주당 근로시간 분포를 탐색한다.
+
+g = sns.catplot(data=df, x="age", y="education", hue="target", kind="box")
+axs = g.facet_axis(0, 0) 
+plt.show()
+
+------------------------------------------------
+
+education level - 대부분의 교육 수준에서 나이의 중앙값은 비슷한 분포를 띄고 있다.
+preschool 수준에서는 나이대가 어리며, 이 수준의 교육을 받은 사람들이 상대적으로 젊은 연령대에 분포해 있다.
+doctorate와 prof-school에서는 나이대가 높고, 해당 교육 수준을 이수하는데 상재덕으로 더 많은 시간이 소요됨을 의미한다.
+
+target - target 값에 따라 각 교육 수준의 나이 분포에 차이가 있다. 소득이 50K 이상인 그룹은 일반적으로 50K 이하인 그룹보다 나이대가 높게 분포해 있는 것으로 보인다.
+
+outliers - 박스 플랏에서 이상치로 표시된 데이터는 각 교육 수준에서 일반적인 나이대를 벗어난 값들이다.
+bachelors, master, prof-school, doctorate 수준에서 50K 이상의 소득을 가진 이상치가 많이 관찰된다.
+
+나이 분포는 교육 수준에 따라 다르며, 고등교육을 받은 그룹에서 더 넓게 분포한다.
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+데이터 불러오기
+
+import pandas as pd
+
+train = pd.read_csv('train.csv')
+
+------------------------------------------------
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+train 데이터의 결측값 분석과 비율 시각화
+
+결측치는 데이터가 누락된 상태를 의미하며, 이러한 결측치가 있는 경우 정확한 분석이 어려울 수 있다. 따라서 먼저 데이터에 어떤 변수들이 결측치를 가지고 있는지, 얼마나 많은 비율로 가지고 있는지 파악해야 한다.
+
+결측치가 있는 피처들의 결측치 개수와 그 비율을 계산하여 바 차트로 시각화 해보자.
+
+########## 데이터프레임의 결측값 분석 및 비율 계산##########
+import numpy as np
+
+train_miss_frame = train[train.columns[train.isnull().any(axis=0)]]
+# any(axis=0) 함수는 각 열에 대해서 불리언 값이 하나라도 True가 있는지 확인한다
+
+train_miss = pd.DataFrame({
+    'missing': train_miss_frame.isnull().sum(),
+    'ratio': np.round(train_miss_frame.isnull().sum() / train_miss_frame.shape[0], 4) * 100
+})
+
+display(train_miss)
+
+########## 시각화를 통한 결측값 분석 및 비율 시각화##########
+import matplotlib.pyplot as plt
+fig, ax = plt.subplots(figsize=(5, 4))
+
+width = 0.35
+
+train_miss_col = ['native.country', 'occupation', 'workclass']
+
+x = np.arange(len(train_miss_col))
+# 0부터 len(train_miss_col)-1 까지의 넘파이 배열을 생성한다. x축 위치를 결정하는데 사용
+
+y1 = train_miss['missing'].sort_index()
+y1_ = train_miss['ratio'].sort_index()
+
+bar1 = ax.bar(x, y1, label="train data", color="cornflowerblue")
+ax.set_ylim(0, 600)
+ax.set_xticks(x, train_miss_col)
+
+ax.bar_label(bar1, padding=12, size=10)
+ax.bar_label(bar1, labels=['(%.2f%%)' % y for y in y1_], padding=3, size=10)
+ax.set_title("Missing Ratio", pad=10, size=15)
+ax.legend(loc='best', fontsize=10)
+
+plt.show()
+
+------------------------------------------------
+
+            missing	ratio
+workclass	463	10.43
+occupation	468	10.54
+native.country	147	3.31
+
+workclass에는 463개의 결측치 (전체의 10.43퍼센트)
+occupation에는 468개의 결측치 (전체의 10.54)
+native.country에는 147개의 결측치 (전체의 3.31)
+
+결측값의 개수를 보면 occupation과 workclass의 결측값의 개수가 유사하다.
+비슷한 수준으로 발생했다는 것을 예상할 수 있다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+결측값 분포 시각화
+
+missingno 라이브러리를 활용하여 결측치의 분포를 시각화하여 확인할 수 있다.
+matrix 함수를 사용하여 결측값을 시각화 한다.
+각 행이 데이터의 행, 열은 데이터의 열을 나타낸다.
+
+각 셀은 데이터가 결측값인 경우 흰색으로 표시되고, 존재하는 경우 검은색으로 표시된다.
+이를 통해 결측값의 분포와 패턴을 확인할 수 있다.
+어떤 식으로 분포했는지 파악해 보자.
+
+import missingno as msno
+msno.matrix(train)
+plt.show()
+
+------------------------------------------------
+
+workclass와 occupation 칼럼에서 비슷한 패턴으로 나타나고 있다.
+즉, 동시에 결측값이 발생하는 경우가 많다는 것을 의미하고,
+이 두 변수가 어느정도 상관관계가 있는 것으로 추측할 수 있다. 이를 고려하여 결측값 처리를 해주는 것이 좋다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+데이터 파일 불러오기
+
+예측 모델을 통해 결측치를 예측/ 최빈값으로 대체해 보자.
+
+결측값이 있는 경우의 문제점
+- 분석 모델 성능의 저하
+- 편향된 결과
+- 정보 손실
+
+처리 방법
+- 제거
+- 대체
+- 예측 모델 활용
+
+import pandas as pd
+
+train_origin = pd.read_csv('train.csv')
+
+------------------------------------------------
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+직업(occupation) 결측값이 있는 행과 없는 행 분리
+
+occupation의 결측값을 랜덤 포테르스 알고리즘을 사용하여 예측하고 대체해 보자.
+랜덤 포레스트는 여러 개의 의사결정트리를 결합하여 사용하는 알고리즘으로, 각 트리의 예측을 평균내어 최종 예측을 수행한다.
+
+# ~을통해서 결측값이 없는 행만을 선택해 데이터 프레임에 저장
+missing_occupation = train_origin[train_origin['occupation'].isnull()]
+non_missing_occupation = train_origin[~train_origin['occupation'].isnull()]
+
+display(missing_occupation.head(3))
+display(non_missing_occupation.head(3))
+
+display(missing_occupation.shape)
+display(non_missing_occupation.shape)
+
+------------------------------------------------
+
+(468, 16) -> 결측치가 있는 데이터프레임의 행과 열
+(3972, 16) -> 결측치가 없는 데이터 프레임의 행과 열
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+직업(occupation) 열을 카테고리로 변환 및 숫자 인코딩
+
+데이터 프레임의 occupation 피처는 수치형이 아닌 범주형 변수로 이루어져 있다.
+머신러닝 모델을 훈련하기 위해서는 이 열의 데이터를 숫자로 인코딩 하는 과정을 진행해야 한다.
+
+# 원본 데이터의 보호를 위해 데이터 프레임을 복사하여 새로운 데이터 프레임으로 저장
+missing_occupation = missing_occupation.copy()
+non_missing_occupation = non_missing_occupation.copy()
+
+# 'occupation' 열을 카테고리 타입으로 변환 
+# astype() 함수를 사용하여 occupation 열을 카테고리(category)타입으로 변환
+non_missing_occupation['occupation'] = non_missing_occupation['occupation'].astype('category')
+
+# 카테고리 목록 및 매핑 생성
+# .cat.categories를 통해 occupation 열의 고유한 카테고리 목록을 추출한다.
+occupation_categories = non_missing_occupation['occupation'].cat.categories
+category_to_number = {category: number for number, category in enumerate(occupation_categories)}
+
+# 'occupation' 열을 숫자로 인코딩
+non_missing_occupation['occupation'] = non_missing_occupation['occupation'].map(category_to_number)
+non_missing_occupation.head(5)
+
+------------------------------------------------
+
+category_to_number = {'Adm-clerical':0, 'Craft-repair':1, 'Exec-managerial':2, 'Farming-fishing':3, 'Handlers-cleaners':4, 'Machine-op-inspct':5, 'Other-service':6, 'Priv-houes-serv':7, 'Prof-specialty':8, 'Protective-serv':9, 'Sales':10, 'Tech-support':11, 'Transport_moving':12}
+의 순으로 매핑되었다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+랜덤 포레스트 모델을 사용한 직업(occupation) 결측값 대체
+
+* 간단하게 숫자형 변수들만을 사용하여 occupation 열을 타겟으로 설정하여 값들 추측
+(추가적인 범주형 변수들의 전처리 과정 생략)
+
+먼저 데이터를 전처리 하고, 모델 학습을 위해 입력 피처(X)와 타겟을 준비한다.
+랜덤 포레스트 모델을 사용하여 occupation 열의 결측값을 예측하고, 이 값을 대체하는 과정을 진행한다.
+
+numeric_columns = non_missing_occupation.select_dtypes(include=['int', 'float']).columns.tolist() + ['occupation']
+# 수치형 컬럼들과 예측할 occupation 칼럼을 합쳐서 numeric_columns 설정
+
+# 입력 피처(X)와 타겟(occupation)을 분리
+# X에 입력 피처가 들어가므로 마지막 열을 제외하고 선택, y에는 마지막 열만 선택
+X_train = non_missing_occupation[numeric_columns[:-1]]
+y_train = non_missing_occupation[numeric_columns[-1]]
+
+X_valid = missing_occupation[numeric_columns[:-1]]
+y_valid = missing_occupation[numeric_columns[-1]]
+
+# 랜덤 포레스트 모델 훈련
+from sklearn.ensemble import RandomForestClassifier
+
+model = RandomForestClassifier(random_state=24)
+model.fit(X_train, y_train)
+predicted_occupation = model.predict(X_valid)
+
+# 결측값 대체
+missing_occupation['occupation'] = predicted_occupation
+missing_occupation.head(5)
+
+------------------------------------------------
+
+결과 occupation 열의 대체된 값들을 확인 할 수 있다.
+
+*결측치가 많을때에는 교차검증을 통해 과적합 여부를 판단해야 한다.
+결측치를 채운 후, 모델 성능을 비교하거나 시뮬레이션 테스트를 수행해야 한다.
+결측치가 많거나 특정 변수에 편중되어 있다면, 다른 결측치 처리 방법과 비교하여 결과를 검증한다.
+분포 왜곡 여부를 확인하기 위해 채운 데이터의 분포를 원 데이터와 비교해 본다.
+랜덤포레스트는 상관성을 기반으로 예측, 상관성이 낮거나 변수가 독립적이라면 결측치를 채우기 부정확 할 수 있다.
+이때는 상관 분석을 통해 연관성이 높은 변수만 포함하여 채운다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+직업(occupation) 열의 카테고리 역방향 매핑
+
+수치형으로 바꿨던 occupation 피처를 다시 범주형의 데이터셋으로 복원
+
+# train 데이터프레임 복원
+# 결측값을 채울때 사용했던(예측에 사용) non_missing_occupation과 예측을 통해 채운 missing_occupation을 다시 합친다.
+train_imputed_occupation = pd.concat([non_missing_occupation, missing_occupation])
+
+# 카테고리 매핑 역방향 설정
+# 앞서 설정한 category_to_number의 키와 값을 뒤집어 새로운 딕셔너리를 만든다
+number_to_category = {num: cat for cat, num in category_to_number.items()}
+
+# 'occupation' 열을 카테고리로 복원
+train_imputed_occupation['occupation'] = train_imputed_occupation['occupation'].map(number_to_category)
+train_imputed_occupation.head(3)
+
+------------------------------------------------
+
+원래의 범주형 분포로 복원하는 이유
+
+인코딩을 적용하는 경우는 주로 모델 학습을 위한 train 데이터와 모델의 성능 평가를 위한 test 데이터에 동일한 방식을 적용하기 위해 필요하다.
+
+train과 test에 동일한 방식으로 인코딩을 해 학습해야 모델이 test 데이터를 이해하고 예측할 수 있다.
+
+즉, 동일한 인코딩 방식을 적용하기 위해 원해의 범주형 분포로 복원한다. 일관성 있는 예측을 수행할 수 있다.
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+학습 및 테스트 데이터의 결측값 대체
+
+native.country와 workclass 피처에도 결측치가 존재한다.
+이번에는 최빈값을 통해 사용해보자.
+
+test_origin = pd.read_csv('test.csv')
+
+# SimpleImputer를 사용하여 결측값 대체
+from sklearn.impute import SimpleImputer
+
+# strategy='most_frequent' 을 통해 최빈값으로 설정
+imputer = SimpleImputer(strategy='most_frequent')
+train_imputed_occupation[['occupation', 'workclass', 'native.country']] = imputer.fit_transform(train_imputed_occupation[['occupation', 'workclass', 'native.country']])
+test_origin[['occupation', 'workclass', 'native.country']] = imputer.transform(test_origin[['occupation', 'workclass', 'native.country']])
+
+------------------------------------------------
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+학습 및 테스트 데이터의 결측값 확인
+
+missing_train = train_imputed_occupation[['occupation', 'workclass', 'native.country']].isnull().sum()
+missing_test = test_origin[['occupation', 'workclass', 'native.country']].isnull().sum()
+
+print("학습 데이터 결측값 확인:\n", missing_train)
+print("\n테스트 데이터 결측값 확인:\n", missing_test)
+
+display(train_imputed_occupation.head(5))
+display(test_origin.head(5))
+
+------------------------------------------------
+
+학습 데이터 결측값 확인:
+ occupation        0
+workclass         0
+native.country    0
+dtype: int64
+
+테스트 데이터 결측값 확인:
+ occupation        0
+workclass         0
+native.country    0
+dtype: int64
+
+를 통해 결측값이 모두 채워졌음을 확인할 수 있다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+이상치 처리
+
+이상치는 관측 값들과 크게 벗어난 데이터 포인트를 의미하며, 이러한 이상치는 데이터 분석이나 모델링의 결과를 왜곡할 수 있다.
+IQR 방법, Z-score, DBSCAN과 같은 다양한 이상치 탐지 및 처리 기법을 학습하고, 처리하는 방법을 알아보자
+
+이를 통해 데이터 왜곡을 최소화하고, 분석 및 모델링의 정확도를 향상시킬 수 있는 방법을 알아보자.
+
+필요한 라이브러리(Library) 불러오기 & 데이터 불러오기
+
+
+# 시각화에 필요한 라이브러리 Import
+import seaborn as sns
+import matplotlib.pyplot as plt
+import warnings
+import matplotlib.font_manager as fm
+import numpy as np
+
+# 불필요한 경고 메시지 무시
+import warnings
+warnings.filterwarnings("ignore")
+
+# 그래프 스타일 설정
+plt.style.use("ggplot")
+
+# 한글 폰트를 사용하기 위한 코드
+fe = fm.FontEntry(fname = 'NotoSansKR-Regular.otf', name = 'NotoSansKR')
+fm.fontManager.ttflist.insert(0, fe)
+plt.rc('font', family='NotoSansKR')
+
+# 데이터 불러오기
+import pandas as pd
+
+train = pd.read_csv('train.csv')
+
+------------------------------------------------
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+Interquartile Range(IQR) 방법을 사용한 'capital.gain' 및 'capital.loss' 피처의 이상치 검출과 시각화
+
+상한치(Q3 + 1.5IQR)보다 크거나 하한치(Q1 - 1.5IQR)보다 작은 경우 이상치로 간주된다.
+
+capital.gain과 capital.loss 피처를 중심으로 이상치 검출.
+검출및 시각화를 위해 IQR 방법을 사용한다.
+
+def out_iqr(df, column):
+    # 퀀타일 함수와 IQR 계산을 적용합니다.
+    q25, q75 = np.quantile(df[column], 0.25), np.quantile(df[column], 0.75)
+    iqr = q75 - q25
+    lower, upper = q25 - (iqr * 1.5), q75 + (iqr * 1.5)
+
+    # 이상치 개수 계산
+    # .shape() 매서드는 차원에 대한 정보를 알려준다. ([0]은 행, [1]은 열)
+    df1 = df[df[column] > upper]
+    df2 = df[df[column] < lower]
+    total_outliers = df1.shape[0] + df2.shape[0]
+
+    # 결과 반환
+    return iqr, lower, upper, total_outliers
+
+# 이상치 확인 및 시각화
+fig, axes = plt.subplots(1, 2, figsize=(10, 3))
+
+iqr_cg, lower_cg, upper_cg, total_outliers_cg = out_iqr(train, 'capital.gain')
+sns.distplot(train['capital.gain'], kde=False, ax=axes[0])
+
+iqr_cl, lower_cl, upper_cl, total_outliers_cl = out_iqr(train, 'capital.loss')
+sns.distplot(train['capital.loss'], kde=False, ax=axes[1])
+
+plt.show()
+
+# 결과 출력
+print('capital.gain의 IQR 값은', iqr_cg)
+print('capital.gain의 하한값은', lower_cg)
+print('capital.gain의 상한값은', upper_cg)
+print('capital.gain의 이상치 개수는', total_outliers_cg, '개입니다.\n')
+
+print('capital.loss의 IQR 값은', iqr_cl)
+print('capital.loss의 하한값은', lower_cl)
+print('capital.loss의 상한값은', upper_cl)
+print('capital.loss의 이상치 개수는', total_outliers_cl, '개입니다.')
+
+------------------------------------------------
+
+capital.gain의 IQR 값은 0.0
+capital.gain의 하한값은 0.0
+capital.gain의 상한값은 0.0
+capital.gain의 이상치 개수는 389 개입니다.
+
+capital.loss의 IQR 값은 0.0
+capital.loss의 하한값은 0.0
+capital.loss의 상한값은 0.0
+capital.loss의 이상치 개수는 167 개입니다.
+
+capital.gain과 capital.loss의 IQR은 모두 0이므로 상한값과 하한값도 0이다. 즉 0이 아닌 모든 값들은 이상치로 간주된다.
+
+gain은 389개, loss는 167개의 이상치가 있다.
+
+-> 해당 데이터에서는 대부분이 0의 값을 가지고 있고 일부 0이 아닌 값을 가지고 있으므로, 
+IQR을 통한 이상치 탐지는 좋은 방법이 아닐 수 있다.
+
+이럴때 고려할 수 있는 방법으로는
+
+Z-Score : 각 데이터 포인트가 평균으로부터 표준 편차의 몇 배만큼 떨어져 있는지를 측정
+
+로그 변환 : 데이터에 로그 변환을 적용하여 값의 범위를 줄인다. 이상치의 영향을 줄이는데 도움이 된다.
+
+도메인 지식 활용 : 해당 분야 전문가의 도움을 받거나 도메인 지식을 활용하여 처리할 수 있다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+이상치 처리를 위한 데이터 변환 및 왜도(Skewness) 시각화
+
+원본 데이터의 왜도와 각 변환후의 왜도의 변화와 차이를 시각화 해 보자.
+
+왜도 : 데이터의 분포가 대칭인지 여부를 나타내는 통계적 척도. 중심을 기준으로 어떻게 치우쳐 있는지를 설명한다.
+
+    0일수록 좌우가 대칭적.(평균 = 중앙값 = 최빈값)
+    양수면 오른쪽으로 꼬리가 늘어져있다.
+    음수면 왼쪽으로 꼬리가 늘어져 있다.
+
+로그 변환 : 데이터의 값에 자연로그를 취하여 데이터의 분포를 정규 분포에 가깝게 만든다. np.log1p 함수는 각 데이터포인트에 1을 더한 후 로그를 취하여 음수가 되거나 0의 값을 갖는 것을 방지한다.
+
+box-cox 변환 : 양의 데이터에 대해 정규 분포에 가깝게 만들기 위한 통계적 변환 방법이다.
+
+제곱근 변환 : 해당 데이터의 값을 제곱근으로 대체하는 변환 방법이다. 주로 데이터의 왜도를 줄이는데 사용된다. 데이터에 0 또는 양의 값이 포함되어 있을 때 사용하며, 분포를 정규화하고 이상치의 영향을 줄이는데 사용한다.
+
+from scipy import stats
+
+transformations = ["원본 데이터", "로그 변환", "Box-Cox 변환", "제곱근 변환"]
+variables = ["capital.gain", "capital.loss"]
+colors = ['b', 'y', 'r', 'g']
+
+fig, axes = plt.subplots(4, 2, figsize=(10,10))
+
+for i, var in enumerate(variables):
+    
+    # 데이터 변환
+    # 로그 변환 - 1을 더한값에 자연로그를 취한다
+    log_data = np.log1p(train[var])
+    # box-cox변환 - stats.boxcox함수를 사용하여 변환을 수행한 후, 1을 더한다. [0] 인덱스로 변환된 데이터를 추출한 후, pandas Series로 변환한다.
+    boxcox_data = pd.Series(stats.boxcox(train[var]+1)[0])
+    # 제곱근 변환
+    sqrt_data = np.sqrt(train[var])
+    data_list = [train[var], log_data, boxcox_data, sqrt_data]
+
+    # 시각화
+    for j, data in enumerate(data_list):
+        sns.histplot(data, kde=True, ax=axes[j,i], color=colors[j], bins=30)
+        axes[j, i].set_title(f"{variables[i]} - {transformations[j]} (Skewness: {data.skew():.2f})")
+        axes[j, i].set_xlabel('')
+        axes[j, i].set_ylabel('')
+
+plt.tight_layout()
+plt.show()
+
+------------------------------------------------
+
+capital gain 원본 왜도 : 10.94
+            로그 변환 왜도 : 3.00
+            boxcox 변환 왜도 : 2.92
+            제곱근 변환 왜도 : 5.87
+            
+capital loss 원본 왜도 : 5.08
+            로그 변환 왜도 : 4.87
+            boxcox 변환 왜도 : 4.86
+            제곱근 변환 왜도 : 4.94
+            
+capital gain의 경우 원본의 왜도가 매우 높다. 
+    로그 변환시 왜도가 줄었으나 여전히 높고 약간의 개선이 있다.
+    boxcox 변환시 왜도가 더 줄어 데이터가 더 정규화 되었다.
+    제곱근 변환시 왜도가 줄었으나 boxcox 변환 만큼은 아니다.
+    
+capital loss의 경우 원본의 왜도가 매우 높고 0 주변에 값들이 집중되어 있다.
+    로그 변환시 왜도가 줄었으나 여전히 높다
+    boxcox 변환시 왜도가 더 줄어 데이터의 분포가 더 정규화 되었다.
+    제곱근 변환시 왜도가 줄었으나 boxcox 만큼은 아니다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+Z-Score를 사용한 Capital Gain 및 Loss 이상치 검출과 시각화
+
+z-점수는 데이터 포인트가 평균으로부터 얼마나 떨어져 있는지를 나타내는 수치이다.
+데이터 포인트가 세트의 평균에 비해 어느 정도 표준편차만큼 떨어져 있는지를 나타낸다.
+
+각 데이터 포인트에서 전체 데이터 세트의 평균을 빼 줌으로서 만들어진 새로운 데이터 세트의 평균이 0 이 된다.
+즉, 각 데이터 포인트의 원래 데이터의 평균에서 얼마나 떨어져 있는지를 나타내는 값이 된다.
+
+z-점수를 계산하기 위해서는 데이터를 표준화 해야 한다. 먼저 단위를 제거 하고, 값들을 표준편차의 단위로 변환하는 과정을 표준화라고 한다.
+각 데이터 포인트에서 평균을 빼주고, 표준편차로 나누어 주면 새로운 데이터 세트의 평균값은 0, 표준편차는 1이 된다. 이렇게 스케일을 일치시키고, 
+서로 다른 데이터 세트 간에 비료를 쉽게 할 수 있다.
+
+표준화 까지 끝나면, 각 데이터 포인트가 평균으로부터 몇 개의 표준편차만큼 떨어져 있는지를 나타내는 표준화된 값을 갖는다.
+
+z-점수가 특정값(보통 +-3) 이상일때 이상치로 간주할 수 있다. 이는 정규분포에서 99.7%의 데이터가 평균에서 +-3 표준편차 범위에 존재하는 경향이 있기 때문이다.
+
+이렇게 z-점수를 사용하는 이유는 데이터의 분포가 정규분포에 가까울 때 이상치 탐지를 효과적으로 할 수 있기 때문이다.
+
+# 이상치 검출
+# Z-score는 데이터에서 평균을 빼고 그 값을 표준편차로 나누어 계산한 것이다. 절대값을 취한 z-score가 임계값 보다 큰 값을 갖는 z-score 데이터 포인트를 이상치로 식별한다.
+
+def find_and_plot_zscore_outliers(data, threshold):
+    z_scores = (data - data.mean()) / data.std()
+    outliers = data[abs(z_scores) > threshold]
+    return f"Total number of outliers are {len(outliers)}"
+
+# 시각화
+fig, axis = plt.subplots(1, 2, figsize=(10, 3))
+
+outliers_gain = find_and_plot_zscore_outliers(train['capital.gain'], threshold=3)
+outliers_loss = find_and_plot_zscore_outliers(train['capital.loss'], threshold=3)
+
+axis[0].set_title('Capital Gain Z-Score Outliers\n' + outliers_gain)
+axis[1].set_title('Capital Loss Z-Score Outliers\n' + outliers_loss)
+
+sns.histplot((train['capital.gain'] - train['capital.gain'].mean()) / train['capital.gain'].std(), ax=axis[0], kde=True, bins=30)
+sns.histplot((train['capital.loss'] - train['capital.loss'].mean()) / train['capital.loss'].std(), ax=axis[1], kde=True, bins=30)
+
+plt.tight_layout()
+plt.show()
+
+------------------------------------------------
+
+capital gain에서는 z-score를 통해 이상치로 간주되는 값이 32개
+capital loss는 162개가 검출되었다.
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+DBSCAN(Density-Based Spatial Clustering of Applications with Noise) 을 활용한 이상치 탐지
+
+dbscan은 밀도 기반의 클러스터링 알고리즘으로, 데이터의 밀도에 따라 클러스터를 형성한다.
+이는 이상치를 식별하는데 유용하고, 클러스터의 형태나 개수를 미리 지정할 필요가 없다.
+
+* 작동원리
+
+- 핵심 포인트 식별 : 주어진 최소 이웃 개수 이상의 이웃을 가지며, 주어진 거리 이내에 있는 포인트를 핵심 포인트로 식별
+- 경계 포인트 : 핵심 포인트는 아니지만, 핵심 포인트의 이웃인 포인트를 경계포인트라고 한다. 클러스터의 외각에 위치하며, 다른 클러스터를 연결하는 역할을 한다.
+- 잡음 포인트 : 핵심 포인트도 아니고 경계 포인트의 이웃도 아닌 포인트들. 주어진 최소 이웃 개수 이내에 다른 포인트를 가지지 않는다. 이 포인트들을 잡음 포인트로 간주하고, 클러스터에 속하지 않는 이상 이상치로 처리된다.
+- 클러스터 형성 : 핵심 포인트와 그 이웃 포인트들을 연결하여 클러스터를 형성한다. 각 클러스터는 고밀도 영역을 나타낸다.
+
+- 이상치 식별 : DBSCAN 알고리즘이 모든 데이터 포인트에 대해 클러스터 레이블을 할당한 후, '-1' 레이블은 클러스터에 속하지 않는 포인트, 즉 이상치를 나타낸다.
+- 이상치 제거 : 클러스터에 속하지 않는 데이터 포인트를 데이터셋에서 제거함으로써, 이상치를 제거할 수 있다.
+
+장점 : 클러스터의 형태와 개수에 대한 가정이 필요하지 않다. 이상치에 강건하다.
+단점 : 모든 클러스터가 비슷한 밀도일 때 잘 작동한다. 고차원 데이터에는 성능이 저하될 수 있다.eps와 min_samples와 같은 하이퍼파라미터의 선택이 결과에 큰 영향을 미친다.
+
+from sklearn.cluster import DBSCAN
+
+# DBSCAN을 이용하여 이상치를 식별하는 코드
+# 넘파이 배열 형태로 변환해야 한다. 이때 values 매서드를 사용한다.
+X_db = train[['capital.gain', 'capital.loss']].values
+
+# DBSCAN 모델 적용
+db = DBSCAN(eps=0.5, min_samples=5).fit(X_db)
+labels = db.labels_
+#labels_속성을 사용하여 각 데이터 포인트에 할달된 클러스터 레이블을 가져온다.
+
+# 이상치 레이블의 개수를 출력
+# 클러스터 레이블을 판다스의 시리즈로 변환하고 각 레이블에 속하는 빈도를 계산한다.
+display(pd.Series(labels).value_counts())
+
+# 시각화를 위한 그래프 생성
+fig, ax = plt.subplots(figsize=(4,4))
+colors = ['blue', 'red']
+
+# 파란색으로 표시할 데이터: 이상치가 아닌 데이터 (labels != -1)
+# 빨간색으로 표시할 데이터: 이상치 데이터 (labels == -1)
+for color in colors:
+    outlier_mask = labels == -1 if color == 'red' else labels != -1
+    x = X_db[:, 0][outlier_mask]
+    # 이상치나 클러스터 데이터의 x좌표를 추출한다.X_db는 2D 배열이고, [:, 0]를 통해 x좌표만 선택한다.
+    # [outlier_mask]는 조건에 따라 필터링 된 데이터만 선택한다.
+    y = X_db[:, 1][outlier_mask]
+    ax.plot(x, y, 'o', color=color)
+    
+# color가 red인 경우, 이상치만 선택한다. blue인 경우에는 이상치가 아닌 데이터 포인터를 선택한다.
+# X_db[:,0]은 첫 번째 피처 capital.gain에 해당하고, X_db[:,1]은 capital.loss에 해당한다.
+    
+plt.show()
+
+------------------------------------------------
+
+ 0     3884
+-1      196
+...
+
+이상치(-1 레이블) :  196개의 이상치가 식별되었다.
+클러스터 레이블 : 가장 큰 클러스터 레이블은 레이블0으로, 3884개의 데이터 포인트를 포함한다.
+그 외에도 여러 작은 클러스터들이 존재한다.
+
+DBSCAN의 경우 성능이 eps(엡실론)과 min_samples(최소 샘플 수) 매개변수에 크게 의존한다.
+이 매개변수들이 데이터의 특성에 적절하게 맞춰져 있는지 검토할 필요가 있다.
+
+eps는 데이터 간 거리 분포(KNN)을 기반으로 설정 - 각 데이터 포인트에 대해서 k번째 가장 가까운 이웃과의 거리를 계산하고, 거리값을 오름차순으로 정렬하여 플랏을 그린다. 플랏에서 엘보(변화율이 급격하게 감소하는 지점) 또는 급격한 변화가 발생하는 지점을 eps로 선택한다.
+
+min_samples는 데이터의 밀도와 차원에 따라 결정된다.
+    저차원인경우 4-10
+    고차원인경우 더 크게 설정한다.
+    
+    * 경험적으로 차원수 + 1 보다 크게 설정한다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+데이터 불러오기 & 학습 데이터와 검증 데이터 분할
+
+이상치 처리 방법의 비교 -> 어떤 방법이 가장 적합한지
+이상치를 효과적으로 처리하고 모델의 성능을 개선하는 전략 수립
+
+데이터를 학습과 검증으로 나누자.
+
+* 주의할 점은 train.csv에서 데이터가 불균형 하기 때문에 이러한 불균형을 고려하여 층화 추출을 진행한다.
+
+-> 주어진 데이터셋을 여러부분 집합으로 나눌 때 각 부분에서 특정 속성의 분포를 유지하기 위해 사용한다.
+
+from sklearn.model_selection import train_test_split
+
+# stratify 매개변수를 통해 층화 추출의 기준열을 지정해준다.
+train_origin = pd.read_csv('train.csv')
+train_data, valid_data = train_test_split(train_origin, test_size=0.2, random_state=42, stratify=train_origin['target'])
+
+------------------------------------------------
+
+층화 추출을 사용함 으로서 훈련 및 검증 데이터에서 각 클래스의 비율을 유지하면서 데이터를 나누어 모델의 일반화 성능을 향상 시킬 수 있다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+랜덤포레스트를 활용한 직업(occupation) 결측치 대체
+
+occupation 피처의 결측값을 랜덤포레스트 알고리즘으로 예측 및 대체
+
+from sklearn.ensemble import RandomForestClassifier
+
+# 결측값이 있는 피처에 대해서 랜덤 포레스트로 결측값을 채워주는 함수 생성
+def impute_missing_occupation(train_data):
+    # 결측값이 있는 행과 결측값이 없는 행 분리
+    missing_occupation = train_data[train_data['occupation'].isnull()]
+    non_missing_occupation = train_data[~train_data['occupation'].isnull()]
+
+    # 직업(occupation) 열을 카테고리로 변환 및 숫자 인코딩
+    missing_occupation = missing_occupation.copy()
+    non_missing_occupation = non_missing_occupation.copy()
+
+    # 'occupation' 열을 카테고리 타입으로 변환
+    non_missing_occupation['occupation'] = non_missing_occupation['occupation'].astype('category')
+
+    # 카테고리 목록 및 매핑 생성 & 'occupation' 열을 숫자로 인코딩
+    occupation_categories = non_missing_occupation['occupation'].cat.categories
+    category_to_number = {category: number for number, category in enumerate(occupation_categories)}
+    non_missing_occupation['occupation'] = non_missing_occupation['occupation'].map(category_to_number)
+
+    # 랜덤 포레스트 모델을 사용한 결측값 대체
+    numeric_columns = non_missing_occupation.select_dtypes(include=['int','float']).columns.tolist() + ['occupation']
+
+    # 입력 피처(x)와 타겟(occupation)을 분리
+    x_train = non_missing_occupation[numeric_columns[:-1]]
+    y_train = non_missing_occupation[numeric_columns[-1]]
+
+    x_valid = missing_occupation[numeric_columns[:-1]]
+
+    # 랜덤 포레스트 모델 훈련
+    model = RandomForestClassifier(random_state=24)
+    model.fit(x_train,y_train)
+    predicted_occupation = model.predict(x_valid)
+
+    # 결측값 대체
+    missing_occupation['occupation'] = predicted_occupation
+
+    # 데이터 합치기
+    train_imputed_occupation = pd.concat([non_missing_occupation,missing_occupation])
+
+    # 카테고리 매핑 역방향 설정
+    number_to_category = {num: cat for cat, num in category_to_number.items()}
+
+    # 'occupation' 열을 카테고리로 복원
+    train_imputed_occupation['occupation'] = train_imputed_occupation['occupation'].map(number_to_category)
+
+    return train_imputed_occupation
+
+# 함수 호출
+imputed_train_occupation = impute_missing_occupation(train_data)
+
+------------------------------------------------
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+학습 및 테스트 데이터의 결측값 대체
+
+imputed_train_occupation 데이터 프레임의 native.country 피처와 workclass 피처의 결측치를 최빈값으로 대체
+
+from sklearn.impute import SimpleImputer
+
+def impute_missing_values(train, valid, columns_to_impute):
+    imputed_train_data = train.copy()
+    imputed_valid_data = valid.copy()
+
+    imputer = SimpleImputer(strategy='most_frequent')
+    imputed_train_data[columns_to_impute] = imputer.fit_transform(imputed_train_data[columns_to_impute])
+    imputed_valid_data[columns_to_impute] = imputer.transform(imputed_valid_data[columns_to_impute])
+
+    return imputed_train_data, imputed_valid_data
+
+columns_to_impute = ['occupation', 'workclass', 'native.country']
+imputed_train_data, imputed_valid_data = impute_missing_values(imputed_train_occupation, valid_data, columns_to_impute)
+
+------------------------------------------------
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+LabelEncoder를 사용한 범주형 데이터 인코딩
+
+레이블 인코딩 전퍼리 방법을 적용하여 모델에 적합한 형태로 데이터를 변환
+
+from sklearn.preprocessing import LabelEncoder
+
+def Label_encoding(train_data, test_data):
+    for col in train_data.columns[1:-1]: # ID, target 피처 제외
+        if train_data[col].dtypes == 'object':
+
+            le = LabelEncoder()
+            train_data[col] = le.fit_transform(train_data[col])
+
+            for label in np.unique(test_data[col]):
+                if label not in le.classes_:
+                    le.classes_ = np.append(le.classes_, label)
+            test_data[col] = le.transform(test_data[col])
+    return train_data, test_data
+
+encoded_train, encoded_valid = Label_encoding(imputed_train_data, imputed_valid_data)
+
+------------------------------------------------
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+이상치 제거 및 z-score 변환
+
+범주형 변수들을 레이블 인코딩을 통해 모델이 학습할 수 있는 수치형으로 변환하였다.
+앞서 사용해본 4가지 이상치 처리 방법을 활용하여 모델을 학습하고, 각 방법이 모델 성능에 미치는 영향을 탐색해보자.
+
+Z_encoded_train = encoded_train.copy()
+Z_encoded_valid = encoded_valid.copy()
+
+# Train 데이터의 평균, 표준편차 계산
+mean_train = Z_encoded_train[['capital.loss', 'capital.gain']].mean()
+std_train = Z_encoded_train[['capital.loss', 'capital.gain']].std()
+
+# Train 데이터로 Z-점수 계산
+Z_encoded_train['z_score_loss'] = (Z_encoded_train['capital.loss'] - mean_train['capital.loss']) / std_train['capital.loss']
+Z_encoded_train['z_score_gain'] = (Z_encoded_train['capital.gain'] - mean_train['capital.gain']) / std_train['capital.gain']
+
+# Train 데이터에서 이상치 제거
+threshold = 3
+train_no_outliers = Z_encoded_train[(Z_encoded_train['z_score_loss'].abs() <= threshold) & (Z_encoded_train['z_score_gain'].abs() <= threshold)]
+
+# Test 데이터에서도 동일한 Z-점수 변환을 적용
+Z_encoded_valid['z_score_loss'] = (Z_encoded_valid['capital.loss'] - mean_train['capital.loss']) / std_train['capital.loss']
+Z_encoded_valid['z_score_gain'] = (Z_encoded_valid['capital.gain'] - mean_train['capital.gain']) / std_train['capital.gain']
+
+------------------------------------------------
+
+* test 데이터에서도 동일한 z-점수 변환을 적용할 때, train셋의 mean과 std를 사용하는 이유
+모델이 오직 훈련 데이터로부터 학습한 정보만을 사용하여 새로운 데이터에 적용하기 위함.
+만약 검증 세트의 평균과 표준편차를 사용한다면, 해당 정보가 훈련 과정에 영향을 미치게 되어 검증 결과가 실제 모델의 성능보다 더 낫게 나타나
+데이터 누수가 발생할 수 있다.
+
+실제 환경에서는 훈련 데이터만이 사용가능, 새로운 데이터가 들어올 때 해당 데이터의 진짜 분포를 미리 알 수 없다.
+따라서 모델이 검증 세트 뿐만 아니라 실제 운영 환경에서도 잘 작동할 것으로 기대할 수 있다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+ExtraTreesClassifier 모델을 사용한 valid 데이터 예측 및 평가
+
+ExtraTreesClassifier(Extremely Randomized Trees Classifier)를 사용하여 분류 모델을 훈련하고 검증 데이터에 대한 예측을 평가해본다.
+Marco F1 Score는 모델의 성능을 나타내는 지표 중 하나로, 모델의 분류 능력을 평가하는 데 사용된다. 
+
+* ExtraTreesClassifier(Extremely Randomized Trees Classifier)
+
+앙상블 기반의 분류 알고리즘으로, 해당 모델은 결정 트리의 집합으로 구성되어 있고 랜덤 포레스트와 유사하지만 몇가지 차이가 있다.
+
+트리의 구성 - 각 트리는 데이터셋의 전체 샘플을 사용하여 훈련된다.(랜덤 포레스트와는 달리 부트스트랩 샘플링을 사용하지 않는다.)
+노드 분할 방식 - 랜덤 포레스트는 노드를 분할할 때 최적의 분할을 찾기 위해 모든 후보 특성을 고려하지만, ExtraTrees는 무작위로 선택된 각 특성에 대해 무작위로 분할 임계값을 설정한다. 이는 모델을 더욱 랜덤화 하고, 트리 간의 상관 관계를 줄이는 데 도움이 된다.
+
+오버피팅 방지 - 각각의 결정 트리가 데이터의 작은 변동에 과도하게 반응하는 것을 방지한다.
+
+병렬 처리 - 각 결정 트리가 독립적으로 훈련되므로, 병렬 처리가 가능해 훈련 속도가 매우 빠르다.
+
+다양한 데이터셋에 강하며, 오버피팅을 방지할 수 있고, 빠른 훈련이 가능하다.
+하지만 해석이 어려우며 메모리 사용량이 많다.
+
+ExtraTreesClassifier는 분류 문제에 널리 사용된다. 데이터의 특성이 복잡하거나 불균형한 데이터셋에서 좋은 성능을 보인다.
+
+* Macro F1의 특징
+
+클래스의 불균형이 존재하는 경우, 모델이 다수 클래스에 편향되어 소수 클래스의 패턴을 학습하지 못할 수 있다.
+정확도(Accuracy) 지표는 이러한 불균형을 반영하지 못해, 모델의 실제 성능을 과대평가하게 만들 수 있다.
+
+정밀도와 재현율의 조화평균이 F1 Score으로 해당 두 지표를 동시에 고려할 수 있다.
+
+즉, 모든 클래스를 동등하게 고려할 수 있다. 각 클래스에 대해 F1 Score를 계산하고 이를 평균한다.
+
+# 평가 지표 함수 정의
+from sklearn.metrics import f1_score
+
+def macro_f1_score(y_true, y_pred):
+    return f1_score(y_true, y_pred, average='macro')
+
+# 독립변수 종속변수 분리
+train_y = Z_encoded_train['target']
+train_x = Z_encoded_train.drop(['ID','target','capital.gain','capital.loss','education'],axis = 1)
+
+valid_y = Z_encoded_valid['target']
+valid_x = Z_encoded_valid.drop(['ID','target','capital.gain','capital.loss','education'],axis = 1)
+
+# 모델 학습/예측/평가
+from sklearn.ensemble import ExtraTreesClassifier
+
+extra = ExtraTreesClassifier(random_state=24)
+extra.fit(train_x,train_y)
+Z_pred = extra.predict(valid_x)
+macro_f1_score(valid_y,Z_pred) # 0.7696
+
+------------------------------------------------
+
+0.7696345481942674
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+로그 변환(Log1p)을 적용한 모델 훈련 및 평가
+
+L_encoded_train = encoded_train.copy()
+L_encoded_valid = encoded_valid.copy()
+
+L_encoded_train['log1p_loss'] = np.log1p(L_encoded_train['capital.loss'])
+L_encoded_train['log1p_gain'] = np.log1p(L_encoded_train['capital.gain'])
+
+L_encoded_valid['log1p_loss'] = np.log1p(L_encoded_valid['capital.loss'])
+L_encoded_valid['log1p_gain'] = np.log1p(L_encoded_valid['capital.gain'])
+
+train_y = L_encoded_train['target']
+train_x = L_encoded_train.drop(['ID','target','capital.gain','capital.loss','education'],axis = 1)
+
+valid_y = L_encoded_valid['target']
+valid_x = L_encoded_valid.drop(['ID','target','capital.gain','capital.loss','education'],axis = 1)
+
+extra = ExtraTreesClassifier(random_state=24)
+extra.fit(train_x, train_y)
+L_pred = extra.predict(valid_x)
+macro_f1_score(valid_y,L_pred) # 0.7712
+
+------------------------------------------------
+
+0.771228613845421
+
+로그변환에서는 marco f1 score가 0.77, Z-score 변환에서는 0.76이였다.
+이는 로그 변환 방식이 이 데이터셋에 대해 더 적절한 이상치 처리 방법일 수 있음을 시사한다.
+
+로그 변환은 극단적인 값이 존재하는 경우 유용하다. Z-score 변환은 데이터가 정규분포를 따를 때 효과적이다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+Box-Cox 변환을 적용한 모델 훈련 및 평가
+
+* lambda값의 역할
+
+데이터를 얼마나 강하게 변환할지 결정한다. 즉 왜도를 줄이는데 얼마나 강하게 초점을 맞출지를 결정한다.
+lambda값이 0에 가까울수록 로그변환과 유사하고, 1에 가까울 수록 원본 데이터에 가깝다.
+Box-Cox 변환은 자동적으로 데이터를 가장 잘 정규화하는 lambda값을 자동으로 찾는다.이는 데이터의 분포에 따라 달라지며, 데이터를 가장 정규 분포에 가깝게 만드는 값을 찾는데 사용된다.
+
+실제 분석에서는 데이터의 왜도를 줄여, 모델의 성능을 향상 시킬 수 있다. 특히 선형 모델과 같이 정규 분포를 가정하는 모델에서 유용하다.
+*** 양의 값만을 가진 데이터에 적용되므로, 음수 값을 가진 데이터는 오프셋(offset)을 더해 모든 값이 양수가 되도록 조정해야 한다.
+
+B_encoded_train = encoded_train.copy()
+B_encoded_valid = encoded_valid.copy()
+
+# Box-Cox 변환을 적용하기 위해 offset 값을 설정
+offset = 1  # 0보다 큰 값 (예: 1)으로 설정
+
+# Train 데이터에 Box-Cox 변환 적용
+train_capital_gain_boxcox, gain_lambda = stats.boxcox(B_encoded_train['capital.gain'] + offset)
+train_capital_loss_boxcox, loss_lambda = stats.boxcox(B_encoded_train['capital.loss'] + offset)
+
+# Train 데이터의 lambda 값 확인
+print("Lambda for capital.gain (train):", gain_lambda)
+print("Lambda for capital.loss (train):", loss_lambda)
+
+# valid 데이터에 Train 데이터와 같은 lambda 값을 사용하여 Box-Cox 변환 적용
+valid_capital_gain_boxcox = stats.boxcox(B_encoded_valid['capital.gain'] + offset, lmbda=gain_lambda)
+valid_capital_loss_boxcox = stats.boxcox(B_encoded_valid['capital.loss'] + offset, lmbda=loss_lambda)
+
+# Box-Cox 변환된 Train 데이터와 valid 데이터로 업데이트
+B_encoded_train['boxcos.gain'] = train_capital_gain_boxcox
+B_encoded_train['boxcos.loss'] = train_capital_loss_boxcox
+
+B_encoded_valid['boxcos.gain'] = valid_capital_gain_boxcox
+B_encoded_valid['boxcos.loss'] = valid_capital_loss_boxcox
+
+# 모델 예측
+train_y = B_encoded_train['target']
+train_x = B_encoded_train.drop(['ID','target','capital.gain','capital.loss','education'],axis = 1)
+
+valid_y = B_encoded_valid['target']
+valid_x = B_encoded_valid.drop(['ID','target','capital.gain','capital.loss','education'],axis = 1)
+
+extra = ExtraTreesClassifier(random_state=24)
+extra.fit(train_x, train_y)
+B_pred = extra.predict(valid_x)
+macro_f1_score(valid_y,B_pred) # 0.7682
+
+------------------------------------------------
+
+Lambda for capital.gain (train): -1.3059834820451068
+Lambda for capital.loss (train): -3.38561270808625
+0.7682931375107168
+
+Macro F1 Score가 log1p 변환에서 더 높게 나타나 로그 변환이 더 적합한 변환으로 판단된다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+DASCAN 변환을 적용한 모델 훈련 및 평가
+
+D_encoded_train = encoded_train.copy()
+D_encoded_valid = encoded_valid.copy()
+
+X_sample_scaled = D_encoded_train[['capital.gain', 'capital.loss']]
+
+dbscan = DBSCAN(eps=0.5, min_samples=2)
+clusters_sample = dbscan.fit_predict(X_sample_scaled)
+
+D_encoded_train['clusters'] = clusters_sample
+sample_no_outliers = D_encoded_train[D_encoded_train['clusters'] != -1]
+
+train_y = sample_no_outliers['target']
+train_x = sample_no_outliers.drop(['ID','target','education','clusters'],axis = 1)
+
+valid_y = D_encoded_valid['target']
+valid_x = D_encoded_valid.drop(['ID','target','education'],axis = 1)
+
+extra = ExtraTreesClassifier(random_state=24)
+extra.fit(train_x, train_y)
+D_pred = extra.predict(valid_x)
+macro_f1_score(valid_y,D_pred) # 0.7790
+
+------------------------------------------------
+
+0.7790074659639877
+
+log1p 변환을 사용했을 떄의 점수인 0.77보다 약간 더 높은 점수이다.
+DBSCAN이 이상치 처리에 더 적합한 방법일 수 있다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+특성 공학(feature engineering)을 활용한 데이터 품질 개선과 모델 성능 최적화
+
+특성 공학이란 기존 데이터를 분석하고, 새로운 의미있는 정보를 추출하여 데이터의 품질을 개선한다.
+모델을 성능을 크게 향상 시킬 수 있고, 복잡한 데이터셋에서 숨겨진 패턴과 관계를 발견하는데 도움을 준다.
+
+카이제곱 검증을 통해 범주형 데이터 간의 관계를 분석하고, 다양한 변수를 범주화 하며, 이를 통해 새로운 통찰력을 얻을 수 있다.
+
+이 과정을 통해 데이터의 복잡성을 줄이고, 보다 강력한 예측 모델을 구축할 수 있는 기반을 마련한다.
+
+필요한 라이브러리(Library) 불러오기 & 데이터 불러오기
+
+# 시각화에 필요한 라이브러리 Import        
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+import warnings
+import matplotlib.font_manager as fm     
+import numpy as np
+
+# 불필요한 경고 메시지 무시
+import warnings
+warnings.filterwarnings("ignore")
+
+# 그래프 스타일 설정
+plt.style.use("ggplot")
+
+# 한글 폰트를 사용하기 위한 코드
+fe = fm.FontEntry(fname = 'NotoSansKR-Regular.otf', name = 'NotoSansKR')
+fm.fontManager.ttflist.insert(0, fe)
+plt.rc('font', family='NotoSansKR')
+
+# 데이터 불러오기
+eda_data = pd.read_csv('train.csv')
+
+
+------------------------------------------------
+
+피처 엔지니어링 - 원시 데이터로부터 유용하고 정보가 풍부한 피처를 추출하거나 생성하여 모델의 성능을 향상시키는 과정을 말한다. 피처 엔지니어링은 데이터를 이해하고, 피처간의 관계를 파악하며, 데이터를 모델링에 적합한 형태로 가공하는 작업을 포함한다.
+
+피처 추출, 피처 생성, 범주화, 원핫 인코딩, 특성 스케일링 등이 있다.
+
+데이터에서 의미있는 패턴을 학습하도록 도와주어, 예측 정확도를 높일 수 있다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+카이제곱 통계 분석 및 시각화
+
+카이제곱 검정은 범주형 변수 간의 독립성을 평가하기 위한 통계적 방법으로, 두 변수 간의 관계가 우연히 발생한 것인지 유의미한 관련성이 있는지를 판단한다. 주로 범주형 데이터 간의 관계를 파악할 때 사용된다.
+
+pandas의 crosstab을 통해 두 범주형 변수의 빈도수를 계산하고, 교차 테이블을 생성할 수 있다.
+
+# chi2_contingency 를 통해 카이제곱 통계량과 유의확률을 계산한다.
+from scipy.stats import chi2_contingency
+
+def chi2_plot(data, column1, column2):
+    # 교차 테이블 생성에는 pandas의 crosstab 매서드가 사용된다.
+    cross_tab = pd.crosstab(data[column1], data[column2])
+    # chi2_contingency() 함수는 네개의 값을 반환한다. 뒤의 두 _는 각각 자유도와 기대빈도행렬이다.
+    chi2_statistic, p_value, _, _ = chi2_contingency(cross_tab)
+    return cross_tab, chi2_statistic, p_value
+
+------------------------------------------------
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+교육 수준(eduaction)과 타겟(target) 간 카이제곱 검정 및 시각화
+
+앞서 정의한 chi2_plot 함수를 사용하여 두 범주형 변수간의 카이제곱 독립성 검정을 수행
+
+cross_tab, chi2_statistic, p_value = chi2_plot(eda_data, 'education', 'target')
+
+print(f'카이제곱 통계량: {chi2_statistic:.2f}')
+print(f'p-값: {p_value}')
+
+alpha = 0.05 
+if p_value < alpha:
+    print('귀무가설 기각: 두 변수는 통계적으로 독립적이지 않습니다.')
+else:
+    print('귀무가설 채택: 두 변수는 통계적으로 독립적일 가능성이 있습니다.')
+
+# 비율 테이블 생성
+# 각 그룹 내 비율을 계산하기 위해 각 행의 합(sum(axis=1))으로 각 셀값을 행방향으로(axis='index') 나눠주는 매서드를 사용해야 한다.
+ratio_table = cross_tab.div(cross_tab.sum(axis=1), axis='index')
+# 비율 테이블을 특정 컬럼 기준으로 정렬하기 위해 sort_values 매서드를 사용. 기준은 0이므로 (by=0)
+ratio_table_sorted = ratio_table.sort_values(by=0)
+
+# 막대 그래프 그리기
+axs = ratio_table_sorted.plot(kind='bar', stacked=True) 
+axs.set_ylabel('target')  
+axs.set_title('education 별 Target(타겟) 비율')
+plt.show()
+
+------------------------------------------------
+
+카이제곱 통계량: 650.21
+p-값: 7.476656551203601e-129
+귀무가설 기각: 두 변수는 통계적으로 독립적이지 않습니다.
+
+카이 제곱 통계량은 650, p값은 매우 작다. 그렇기 때문에 귀무가설을 기각하고 education과 target은 통계적으로 유의미한 관계가 있다고 할 수 있다.
+
+그래프를 보면 교육수준별로의 target 비율이 상이함을 보여준다.
+높은 교육 수준을 가진 사람일 수록 target값이 높을 가능성을 갖는다.
+
+해당 변수가 모델링에 사용될 중요한 특성임을 의미한다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+교육 수준(education) 범주화 후의 카이제곱 검정 비교
+
+앞선 결과를 보면 교육수준에 따라 target의 분포가 상당히 다르다는 것을 할 수 있고, target에서 0과 1의 비율이 비슷한 카테고리끼리 새로운 범주로 재분류 하여 분석해 보자.
+이러한 재분류가 타겟 비율에 어떠한 차이를 만들어 내는지 살펴보고, 카이제곱 검정을 사용하여 범주화가 통계적으로 유의미한지 검증해보자.
+
+'Doctorate', 'Prof_school' 는 'Advanced'로,
+'Assoc-acdm', 'Assoc-voc' 는 'INtermediate'로,
+나머지는 'Basic'로 범주화하여 재분류 하였다.
+
+eda_data['education'].replace(['Doctorate', 'Prof_school'], 'Advanced', inplace=True)
+eda_data['education'].replace(['Assoc-acdm', 'Assoc-voc'], 'INtermediate', inplace=True)
+eda_data['education'].replace(['Preschool', '10th', '11th', '12th', '1st-4th', '5th-6th', '7th-8th', '9th'], 'Basic', inplace=True)
+
+###
+_, chi2_statistic, p_value = chi2_plot(eda_data, 'education', 'target')
+
+print(f'카이제곱 통계량: {chi2_statistic:.2f}')
+print(f'p-값: {p_value}')
+
+alpha = 0.05 
+if p_value < alpha:
+    print('귀무가설 기각: 두 변수는 통계적으로 독립적이지 않습니다.')
+else:
+    print('귀무가설 채택: 두 변수는 통계적으로 독립적일 가능성이 있습니다.')
+
+------------------------------------------------
+
+범주화 이전
+카이제곱 통계량: 650.21
+p-값: 7.476656551203601e-129
+
+범주화 이후
+카이제곱 통계량: 648.73
+p-값: 7.747943382932752e-136
+귀무가설 기각: 두 변수는 통계적으로 독립적이지 않습니다.
+
+두 경우 모두 귀무가설이 기각 되었다. education과 target은 통계적으로 독립적이지 않다.
+
+범주화 이후, p값에는 미세한 차이가 있다. 범주화 이후가 더 작아졌으며 두 변수간의 관련성이 더 커짐을 의미한다.
+범주화를 통해 데이터의 구조가 단순화 되었고, 변수간의 관계를 더 명확히 확인할 수 있다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+본 국적(native.country) 시각화
+
+native.country 피처의 값 분포를 바 차트로 시각화하여 각 나라별 인구수의 분포를 파악해보자.
+
+# dropna의 subset을 통해 컬럼을 지정하여 결측치가 있는 행을 제거할 수 있다.
+country_data = eda_data.dropna(subset=['native.country'])
+
+fig, ax = plt.subplots(figsize=(8, 5))
+sns.countplot(y='native.country', data=country_data, ax=ax)
+
+ax.set_title('Distribution of Native Countries')
+ax.set_xlabel('Count')
+ax.set_ylabel('Native Country')
+
+plt.tight_layout()
+plt.show()
+
+------------------------------------------------
+
+대다수 사람들이 미국 출신임을 알 수 있다.
+해당 데이터 셋은 주로 미국 인구를 초점으로 맞춘 것으로 보인다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+본 국적(native.country)과 타겟(target) 간 카이제곱 검정 및 시각화
+
+cross_tab, chi2_statistic, p_value = chi2_plot(eda_data, 'native.country', 'target')
+
+print(f'카이제곱 통계량: {chi2_statistic:.2f}')
+print(f'p-값: {p_value}')
+
+alpha = 0.05 
+if p_value < alpha:
+    print('귀무가설 기각: 두 변수는 통계적으로 독립적이지 않습니다.')
+else:
+    print('귀무가설 채택: 두 변수는 통계적으로 독립적일 가능성이 있습니다.')
+
+# 비율 테이블 생성
+ratio_table = cross_tab.div(cross_tab.sum(axis=1), axis='index')
+ratio_table_sorted = ratio_table.sort_values(by=0)
+
+# 막대 그래프 그리기
+axs = ratio_table_sorted.plot(kind='bar', stacked=True)
+axs.set_xlabel('native.country')  
+axs.set_ylabel('target')  
+axs.set_title('native.country 별 Target(타겟) 비율')
+plt.show()
+
+------------------------------------------------
+
+카이제곱 통계량: 67.05
+p-값: 0.0034516485374650268
+귀무가설 기각: 두 변수는 통계적으로 독립적이지 않습니다.
+
+p값이 0.05보다 작기 때문에 귀무가설을 기각한다. 국가별 출신 인구과 소득 수준 사이에는 통계적으로 유의미한 관계가 있다는 것을 의미한다.
+
+일부 국가에서는 높은 소득을 가진 인구가 많고, 일부는 그렇지 않다.
+
+각 국가의 경제상태, 교육수준, 직업기회 등 다양한 외부의 요인을 받을 수 있다. 또한 데이터 내의 국가별 샘플 수도 결과에 영향을 줄 수 있으며,
+일부 국가의 경우 샘플 수가 적어 분석 결과의 신뢰성이 떨어질 수 있다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+국가(native.country)별 타겟(target) 비율에 따른 본 국적 범주화(그룹화)
+
+다양한 국가 데이터가 있지만, 분포가 매우 불균형 하다. 그렇기에 proportion 값을 기준으로 교육 수준을 5개의 그룹 중 하나로 분리한다.
+
+target이 1인 비율이 0인 교육수준은 A_group
+target이 1인 비율이 0초과 0.2이하인 교육수준은 B_group
+...
+target이 1인 비율이 0.6초과 교육수준은 E_group
+
+A_group = []
+B_group = []
+C_group = []
+D_group = []
+E_group = []
+
+for country_level in eda_data['native.country'].unique():
+    education_data = eda_data[eda_data['native.country'] == country_level]['target']
+    proportion = sum(education_data) / education_data.count()
+    
+    if proportion == 0.0:
+        A_group.append(country_level)
+    elif proportion > 0.0 and proportion <=0.2:
+        B_group.append(country_level)
+    elif proportion > 0.2 and proportion <=0.4:
+        C_group.append(country_level)
+    elif proportion > 0.4 and proportion <=0.6:
+        D_group.append(country_level)
+    else:
+        E_group.append(country_level)
+
+print('Group 1 (Proportion == 0.0):', A_group)
+print('Group 2 (0.0 < Proportion <= 0.2):', B_group)
+print('Group 3 (0.2 < Proportion <= 0.4):', C_group)
+print('Group 4 (0.4 < Proportion <= 0.6):', D_group)
+print('Group 5 (Proportion > 0.6):', E_group)
+
+------------------------------------------------
+
+Group 1 (Proportion == 0.0): ['Guatemala', 'Puerto-Rico', 'Jamaica', 'Thailand', 'Portugal', 'Poland', 'Haiti', 'Vietnam', 'Honduras', 'Laos', 'Yugoslavia', 'Peru', 'Nicaragua', 'Outlying-US(Guam-USVI-etc)', 'Hong', 'Scotland']
+해당 그룹은 비율이 상대적으로 높다. 이러한 국가들은 경제적으로 낮은 수준을 가질 가능성이 높으며, 소득 불평등이 심할 수 있다.
+
+Group 2 (0.0 < Proportion <= 0.2): ['Mexico', 'Columbia', 'China', 'Philippines', 'Taiwan', 'Germany', 'Dominican-Republic', 'France', 'El-Salvador', 'Cuba']
+
+Group 3 (0.2 < Proportion <= 0.4): ['United-States', 'Trinadad&Tobago', 'India', 'England', 'South', 'Ecuador', 'Italy']
+
+Group 4 (0.4 < Proportion <= 0.6): ['Canada', 'Japan', 'Ireland', 'Hungary', 'Cambodia', 'Greece']
+
+Group 5 (Proportion > 0.6): [nan, 'Iran']
+매우 높은 소득 비율을 나타낸다. 해당 국가의 대부분의 인구가 높은 소득 수준을 가지고 있으며, 경제적으로 상당히 발전되어 있을 가능성이 높다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+국가(native.country)별 타겟(target) 비율에 따른 본 국적 범주화(그룹화) 적용
+
+eda_data['native.country']=eda_data['native.country'].replace(A_group,0)
+eda_data['native.country']=eda_data['native.country'].replace(B_group,1)
+eda_data['native.country']=eda_data['native.country'].replace(C_group,2)
+eda_data['native.country']=eda_data['native.country'].replace(D_group,3)
+eda_data['native.country']=eda_data['native.country'].replace(E_group,4)
+
+cross_tab, chi2_statistic, p_value = chi2_plot(eda_data, 'native.country', 'target')
+
+print(f'카이제곱 통계량: {chi2_statistic:.2f}')
+print(f'p-값: {p_value}')
+
+alpha = 0.05 
+if p_value < alpha:
+    print('귀무가설 기각: 두 변수는 통계적으로 독립적이지 않습니다.')
+else:
+    print('귀무가설 채택: 두 변수는 통계적으로 독립적일 가능성이 있습니다.')
+
+------------------------------------------------
+
+범주화 이전
+카이제곱 통계량: 67.05
+p-값: 0.0034516485374650268
+
+범주화 이후
+카이제곱 통계량: 52.26
+p-값: 1.2181355132417364e-10
+귀무가설 기각: 두 변수는 통계적으로 독립적이지 않습니다.
+
+범주화 전과 후 모두 귀무가설이 기각되어 두 변수간에는 통계적으로 유의미한 관련성이 있음을 나타낸다.
+카이제곱 통계량은 관찰값과 기대값 사이의 차이를 의미한다.
+카이제곱 통계량과 p값이 모두 작아졌으므로, 범주화를 통해 변수간의 관련성이 더 명확하게 드러났음을 의미한다.
+
+해당 피처 엔지니어링은 모델의 예측 능력을 향상시키는 방향으로 변수들 사이의 관계를 개선한 것으로 보인다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+나이(age)와 주당 근로시간(hours.per.week) 관계 분석
+
+sns.jointplot(data=eda_data, x="age", y="hours.per.week", hue="target")
+plt.show()
+
+jointplot을 통해 age와 hours.per.week 특성 간의 관계를 시각화 하였다.
+
+------------------------------------------------
+
+대부분의 데이터 포인트는 나이가 낮고 주당 근무 시간이 중간 정도인 영역에 집중되어 있다.
+고소득 그룹은 주로 중간 나이대와 높은 주당 근무 시간에 분포해 있는것으로 보인다.
+
+나이와 주당 근무 시간 사이에는 뚜렷한 상관관계가 보이지 않는다.
+
+하지만 고소득 그룹에서는 나이가 많고, 주당 근무시간이 높은 경우가 다소 많은 것으로 보인다.
+
+고소득 그룹은 나이대가 높고, 주당 근무 시간이 많은 구간에 많이 분포하고 있다.
+저소득 그룹은 넓게 분포하고 있으며, 젊은 나이대에 많이 볼 수 있다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+age feture 범주화
+
+나이는 연속적 수치 데이터이기 때문에 다양한 값들로 이루어져 전체적인 패턴을 한눈에 파악하기 어렵다.
+따라서, 나이 데이터를 구간별로 나누어 범주화 함으로써 데이터의 분포와 패턴을 더 쉽게 이해하고자 한다.
+
+# cut()함수를 통해 age열을 여러 구간으로 나눈다.
+eda_data['age_bin'] = pd.cut(eda_data['age'], bins=30)
+
+fig, axs = plt.subplots(1, 2, figsize=(20, 5))
+
+# 첫 번째 서브플롯: 나이별 빈도수
+sns.countplot(x="age_bin", data=eda_data, ax=axs[0])
+axs[0].set_xticklabels(axs[0].get_xticklabels(), rotation=45)
+
+# 두 번째 서브플롯: 나이 분포 비교
+sns.distplot(eda_data[eda_data['target'] == 1]['age'], kde_kws={"label": ">$50K"}, ax=axs[1])
+sns.distplot(eda_data[eda_data['target'] == 0]['age'], kde_kws={"label": "<=$50K"}, ax=axs[1])
+
+plt.tight_layout()
+plt.show()
+
+------------------------------------------------
+
+첫번쨰 플랏 - 나이별 빈도수
+나이를 30개의 구간으로 나누어 각 구간별 빈도수를 확인하였다.
+20대 중반에서 30대 초반의 구간에서 높은 빈도수를 관할할 수 있다.
+10대나 고령자(70대이상)은 빈도수가 상대적으로 낮음을 확인할 수 있다.
+
+두번째 플랏 - 나이별 분포 비교
+소득이 50K 이상인 그룹에서는 중장년층의 분포가 두드러지게 나타난다. 이는 중년층이 더 높은 소득을 얻을 가능성이 높음을 나타내며, 경력과 경험이 소득에 중요한 역할을 할 수 있음을 시사한다.
+반면 50K 이하인 그룹에서는 젊은 연령대의 분포가 너 높다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+train 데이터에 범주화(교육 수준(education), 결혼 상태(marital.status), 본 국적(native.country)) 적용
+
+앞서 사용한 범주화가 실제 train 데이터 셋에 적용하여 모델의 성능이 개선되는지 확인해보자.
+
+def categorize_features(data):
+    # Education 범주화
+    data['education'].replace(['Doctorate', 'Prof-school'], 'Advanced', inplace=True)
+    data['education'].replace(['Assoc-acdm', 'Assoc-voc'], 'Intermediate', inplace=True)
+    data['education'].replace(['Preschool', '10th', '11th', '12th', '1st-4th', '5th-6th', '7th-8th', '9th'], 'Basic', inplace=True)
+
+    # Marital Status 범주화
+    data['marital.status'].replace(['Never-married', 'Married-spouse-absent'], 'UnmarriedStatus', inplace=True)
+    data['marital.status'].replace(['Married-AF-spouse', 'Married-civ-spouse'], 'Married', inplace=True)
+    data['marital.status'].replace(['Separated', 'Divorced'], 'MarriageEnded', inplace=True)
+
+    # Native Country 범주화
+    data['native.country'] = data['native.country'].replace(A_group, 0)
+    data['native.country'] = data['native.country'].replace(B_group, 1)
+    data['native.country'] = data['native.country'].replace(C_group, 2)
+    data['native.country'] = data['native.country'].replace(D_group, 3)
+    data['native.country'] = data['native.country'].replace(E_group, 4)
+    
+    return data
+
+------------------------------------------------
+
+education
+    'Doctorate', 'Prof-school' -> 'Advanced'
+    'Assoc-acdm', 'Assoc-voc' -> 'Intermediate'
+    그외 -> 'Basic'
+
+marital.status
+    'Never-married', 'Married-spouse-absent' -> 'UnmarriedStatus'
+    'Married-AF-spouse', 'Married-civ-spouse' -> 'Married'
+    'Separated', 'Divorced' -> 'MarriageEnded'
+    
+native.country
+    0이하 -> A_group
+    0초과 20이하 -> B_group
+    20초과 40이하 -> C_group
+    40초과 60이하 -> D_group
+    60초과 -> E_group
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+파생 변수 생성: 나이(age)와 주당 근무 시간(hours.per.week)의 곱, 나이(age) 범주화
+
+age와 hours.per.week를 곱하여 새로운 파생변수 age-hours를 생성
+
+-> 연령과 주당 근무시간의 곱은 두 변수간의 상호작용 효과를 나타낸다.
+같은 근무 시간을 가진 사람이더라도 연령에 따라 노동 생산량이 다를 수 있다.
+이러한 상호작용을 모델이 포착할 수 있도록 도와준다.
+기계학습은 기본적으로 변수들간의 선형관계를 학습한다. 변수들을 곱함으로써 모델이 데이터의 비선형 관계를 더 잘 이해하고 포착할 수 있다.
+두 변수를 곱함으로써 어떤 변수가 타겟 변수에 더 큰 영향을 미치는지를 모델에게 명시적으로 나태낼 수 있다. 교호작용(독립 변수들이 결합하여 종속 변수에 영향을 미치는 작용)이 중요한 역할을 할 때 유용하다.
+
+age열을 로그 변환 후, cut() 함수를 사용하여 30개의 동일 범위의 구간으로 나눈다.
+
+-> 나이를 범주화하면, 각 연령대 별로 데이터의 분포를 더 명확하게 이해할수 있고, 연령대별 특성과 소득 수준 간의 관계를 분석하는데 유용하다.
+새로운 파생 변수를 생성할 수 있다.
+
+def create_age_hours_feature(data):
+    data['age-hours'] = data['age'] * data['hours.per.week']
+    data['age'] = pd.cut(np.log(data['age']), 30)
+    return data
+    
+------------------------------------------------
+
+랜덤포레스트를 활용한 직업(occupation) 결측치 대체
+
+from sklearn.ensemble import RandomForestClassifier
+
+def impute_missing_occupation(train_data):
+
+    missing_occupation = train_data[train_data['occupation'].isnull()] 
+    non_missing_occupation = train_data[~train_data['occupation'].isnull()]  # 결측값이 없는 행 
+
+    missing_occupation = missing_occupation.copy()
+    non_missing_occupation = non_missing_occupation.copy() # 원본 데이터를 손상시키지않기 위해 복사본 생성
+
+    non_missing_occupation['occupation'] = non_missing_occupation['occupation'].astype('category') # 'occupation' 열을 카테고리 타입으로 변환
+    occupation_categories = non_missing_occupation['occupation'].cat.categories # occupation 피처의 고유한 카테고리 목록을 추출
+    category_to_number = {category: number for number, category in enumerate(occupation_categories)} # occupation_categories 목록의 각 카테고리에 번호를 할당한 딕셔너리를 생성
+    non_missing_occupation['occupation'] = non_missing_occupation['occupation'].map(category_to_number) # 각 카테고리를 해당 번호로 인코딩
+
+    numeric_columns = non_missing_occupation.select_dtypes(include=['int','float']).columns.tolist() + ['occupation'] # 수치형 데이터 열의 이름을 리스트 형태로 반환, 리스트에 occupation 열을 추가
+
+    x_train = non_missing_occupation[numeric_columns[:-1]]
+    y_train = non_missing_occupation[numeric_columns[-1]] # 종속변수만 선택한 후 y_train 변수에 할당
+    x_valid = missing_occupation[numeric_columns[:-1]]
+
+    model = RandomForestClassifier(random_state=24) # RandomForestClassifier 모델을 생성, random_state를 24로 설정하여 재현성을 보장
+    model.fit(x_train,y_train) # 모델 학습
+    predicted_occupation = model.predict(x_valid) # 모델 예측
+    missing_occupation['occupation'] = predicted_occupation # 결측값 대체
+
+    train_imputed_occupation = pd.concat([non_missing_occupation,missing_occupation]) # 결측값이 없는 데이터와 결측값을 대체한 데이터 합치기
+    number_to_category = {num: cat for cat, num in category_to_number.items()} # 카테고리 매핑 역방향 설정
+    train_imputed_occupation['occupation'] = train_imputed_occupation['occupation'].map(number_to_category) # 'occupation' 열을 카테고리로 복원
+
+    return train_imputed_occupation
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+학습 및 테스트 데이터의 결측값 대체
+
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import LabelEncoder
+
+def impute_missing_values(train, valid, columns_to_impute):
+    imputed_train_data = train.copy()
+    imputed_valid_data = valid.copy()
+
+    imputer = SimpleImputer(strategy='most_frequent')
+    imputed_train_data[columns_to_impute] = imputer.fit_transform(imputed_train_data[columns_to_impute])
+    imputed_valid_data[columns_to_impute] = imputer.transform(imputed_valid_data[columns_to_impute])
+
+    return imputed_train_data, imputed_valid_data
+
+def label_encoding(train_data, test_data):
+    select_category_columns = train_data.select_dtypes(['object', 'category']).columns
+    target = ['ID', 'target']  # 제외하고자 하는 열 이름
+    result = [x for x in select_category_columns if x not in target]
+
+    for col in result:
+        if train_data[col].dtype == 'object' or train_data[col].dtype == 'category':
+            le = LabelEncoder()
+            train_data[col] = le.fit_transform(train_data[col])
+
+            for label in np.unique(test_data[col]):
+                if label not in le.classes_:
+                    le.classes_ = np.append(le.classes_, label)
+            test_data[col] = le.transform(test_data[col])
+    return train_data, test_data
+
+------------------------------------------------
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+데이터 전처리 및 특성 엔지니어링 함수 적용
+
+train_origin = pd.read_csv('train.csv')
+
+categorize_three_features = categorize_features(train_origin)
+create_age_hours = create_age_hours_feature(categorize_three_features)
+
+from sklearn.model_selection import train_test_split
+train_data, valid_data = train_test_split(create_age_hours, test_size=0.2, random_state=42, stratify=train_origin['target'])
+imputed_train_occupation = impute_missing_occupation(train_data)
+
+columns_to_impute = ['occupation', 'workclass', 'native.country']
+imputed_train_data, imputed_valid_data = impute_missing_values(imputed_train_occupation, valid_data, columns_to_impute)
+encoded_train, encoded_valid = label_encoding(imputed_train_data, imputed_valid_data)
+
+------------------------------------------------
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+로그 변환(Log1p)을 적용한 모델 훈련 및 평가
+
+from sklearn.metrics import make_scorer, f1_score
+from sklearn.model_selection import cross_val_score
+
+L_encoded_train = encoded_train.copy()
+L_encoded_valid = encoded_valid.copy()
+
+L_encoded_train['log1p_loss'] = np.log1p(L_encoded_train['capital.loss'])
+L_encoded_train['log1p_gain'] = np.log1p(L_encoded_train['capital.gain'])
+
+L_encoded_valid['log1p_loss'] = np.log1p(L_encoded_valid['capital.loss'])
+L_encoded_valid['log1p_gain'] = np.log1p(L_encoded_valid['capital.gain'])
+
+train_y = L_encoded_train['target']
+train_x = L_encoded_train.drop(['ID','target','capital.gain','capital.loss','education.num'],axis = 1)
+
+valid_y = L_encoded_valid['target']
+valid_x = L_encoded_valid.drop(['ID','target','capital.gain','capital.loss','education.num'],axis = 1)
+
+from sklearn.ensemble import ExtraTreesClassifier
+
+extra = ExtraTreesClassifier(random_state=24)
+f1_scorer = make_scorer(f1_score, average='macro')
+cross_val_scores = cross_val_score(extra, train_x, train_y, cv=3, scoring=f1_scorer)
+mean_f1_score = np.mean(cross_val_scores)
+print("Mean Cross-Validation F1 Score:", mean_f1_score) # 0.7727
+
+------------------------------------------------
+
+Mean Cross-Validation F1 Score: 0.7727553343966492
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+DASCAN을 적용한 모델 훈련 및 평가
+
+from sklearn.cluster import DBSCAN
+
+D_encoded_train = encoded_train.copy()
+D_encoded_valid = encoded_valid.copy()
+
+X_sample_scaled = D_encoded_train[['capital.gain', 'capital.loss']]
+
+dbscan = DBSCAN(eps=0.5, min_samples=4)
+clusters_sample = dbscan.fit_predict(X_sample_scaled)
+
+D_encoded_train['clusters'] = clusters_sample
+sample_no_outliers = D_encoded_train[D_encoded_train['clusters'] != -1]
+
+train_y = sample_no_outliers['target']
+train_x = sample_no_outliers.drop(['ID','target','education.num','clusters'],axis = 1)
+
+valid_y = D_encoded_valid['target']
+valid_x = D_encoded_valid.drop(['ID','target','education.num'],axis = 1)
+
+from sklearn.ensemble import ExtraTreesClassifier
+
+extra = ExtraTreesClassifier(random_state=24)
+f1_scorer = make_scorer(f1_score, average='macro')
+cross_val_scores = cross_val_score(extra, train_x, train_y, cv=3, scoring=f1_scorer)
+mean_f1_score = np.mean(cross_val_scores)
+print("Mean Cross-Validation F1 Score:", mean_f1_score) # 0.7872
+
+------------------------------------------------
+
+Mean Cross-Validation F1 Score: 0.7843746695473008
+
+log1p 변환을 사용한 이상치 제거의 성능은 0.7716
+dbscan을 통한 이상치 제거의 성능은 0.7872
+
+서로 다른 방식으로 이상치를 처리한다. log1p는 데이터의 스케일을 조정, dbscan은 실제 이상치를 제거한다.
+
+결과 dbscan이 더 효과적으로 이상치를 제거하여 모델의 예측 성능을 향상했음을 의미한다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+클래스 불균형과 정규화를 활용한 모델 성능 최적화
+
+필요한 라이브러리(Library) 불러오기 & 데이터 불러오기
+
+# 시각화에 필요한 라이브러리 Import        
+import seaborn as sns
+import matplotlib.pyplot as plt
+import warnings
+import matplotlib.font_manager as fm      
+import pandas as pd
+import numpy as np
+from sklearn.metrics import f1_score
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import train_test_split
+from scipy import stats
+
+# 불필요한 경고 메시지 무시
+warnings.filterwarnings("ignore")
+
+# 그래프 스타일 설정
+plt.style.use("ggplot")
+
+# 한글 폰트를 사용하기 위한 코드
+fe = fm.FontEntry(fname = 'NotoSansKR-Regular.otf', name = 'NotoSansKR')
+fm.fontManager.ttflist.insert(0, fe)
+plt.rc('font', family='NotoSansKR')
+
+------------------------------------------------
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+데이터 전처리 함수 정의: 범주화, 결측값 처리, 레이블 인코딩1
+
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import LabelEncoder
+
+def preprocess_data(df, country_groups):
+    # 교육 수준 및 결혼 상태 범주화
+    df['education'].replace(['Doctorate', 'Prof-school'], 'highEducation', inplace=True)
+    df['education'].replace(['Assoc-acdm', 'Assoc-voc'], 'SomeHigherEd', inplace=True)
+    df['education'].replace(['Preschool', '10th', '11th', '12th', '1st-4th', '5th-6th', '7th-8th', '9th'], 'LowEducation', inplace=True)
+
+    df['marital.status'].replace(['Never-married', 'Married-spouse-absent'], 'UnmarriedStatus', inplace=True)
+    df['marital.status'].replace(['Married-AF-spouse', 'Married-civ-spouse'], 'Married', inplace=True)
+    df['marital.status'].replace(['Separated', 'Divorced'], 'MarriageEnded', inplace=True)
+
+    # 나이와 근무 시간의 결합 변수 생성
+    df['age-hours'] = df['age'] * df['hours_per_week']
+    df['age'] = pd.cut(np.log(df['age'], 30))
+
+    # 국가 범주화 (훈련 데이터에서만 국가 그룹을 생성)
+    # inplace를 True로 설정하면 원본 데이터를 직접 수정.(반환값이 없다.)
+    for group in country_groups:
+        df['native.country'].replace(country_groups[group], group, inplace=True)
+        # 해당 국가를 국가그룹으로 치환
+
+    return df
+
+def categorize_countries(df):
+    country_groups = {0: [], 1: [], 2: [], 3: [], 4: []}
+    for country in df['native.country'].unique():
+        education_data = df[df['native.country'] == country]['target']
+        proportion = sum(education_data) / education_data.count()
+        
+        if proportion == 0.0:
+            country_groups[0].append(country)
+        elif 0.0 < proportion <= 0.2:
+            country_groups[1].append(country)
+        elif 0.2 < proportion <= 0.4:
+            country_groups[2].append(country)
+        elif 0.4 < proportion <= 0.6:
+            country_groups[3].append(country)
+        else:
+            country_groups[4].append(country)
+    
+    return country_groups
+
+def impute_missing_occupation(train_data):
+
+    missing_occupation = train_data[train_data['occupation'].isnull()] 
+    non_missing_occupation = train_data[~train_data['occupation'].isnull()]  # 결측값이 없는 행 
+
+    missing_occupation = missing_occupation.copy()
+    non_missing_occupation = non_missing_occupation.copy() # 원본 데이터를 손상시키지않기 위해 복사본 생성
+
+    non_missing_occupation['occupation'] = non_missing_occupation['occupation'].astype('category') # 'occupation' 열을 카테고리 타입으로 변환
+    occupation_categories = non_missing_occupation['occupation'].cat.categories # occupation 피처의 고유한 카테고리 목록을 추출
+    category_to_number = {category: number for number, category in enumerate(occupation_categories)} # occupation_categories 목록의 각 카테고리에 번호를 할당한 딕셔너리를 생성
+    non_missing_occupation['occupation'] = non_missing_occupation['occupation'].map(category_to_number) # 각 카테고리를 해당 번호로 인코딩
+
+    numeric_columns = non_missing_occupation.select_dtypes(['int','float']).columns.tolist() + ['occupation'] # 수치형 데이터 열의 이름을 리스트 형태로 반환, 리스트에 occupation 열을 추가
+
+    x_train = non_missing_occupation[numeric_columns[:-1]]
+    y_train = non_missing_occupation[numeric_columns[-1]] 
+    x_valid = missing_occupation[numeric_columns[:-1]]
+
+    model = RandomForestClassifier(random_state=24) # RandomForestClassifier 모델을 생성, random_state를 24로 설정하여 재현성을 보장
+    model.fit(x_train,y_train) # 모델 학습
+    predicted_occupation = model.predict(x_valid) # 모델 예측
+    missing_occupation['occuaption'] = predicted_occupation # 결측값 대체
+
+    train_imputed_occupation = pd.concat([non_missing_occupation,missing_occupation]) # 결측값이 없는 데이터와 결측값을 대체한 데이터 합치기
+    number_to_category = {num: cat for cat, num in category_to_number.items()} # 카테고리 매핑 역방향 설정
+    train_imputed_occupation['occupation'] = train_imputed_occupation['occupation'].map(number_to_category) # 'occupation' 열을 카테고리로 복원
+
+    return train_imputed_occupation
+
+def impute_missing_values(train, valid, columns_to_impute):
+    imputed_train_data = train.copy()
+    imputed_valid_data = valid.copy()
+
+    imputer = SimpleImputer(strategy='most_frequent')
+    imputed_train_data[columns_to_impute] = imputer.fit_transform(imputed_train_data[columns_to_impute])
+    imputed_valid_data[columns_to_impute] = imputer.transform(imputed_valid_data[columns_to_impute])
+
+    return imputed_train_data, imputed_valid_data
+
+def label_encoding(train_data, test_data):
+    
+    select_category_columns = train_data.select_dtypes(['object','category'])
+    target = ['ID', 'target']  # 제외하고자 하는 열 이름
+    result = [x for x in select_category_columns if x not in target]
+
+    for col in result:
+        le = LabelEncoder()
+        train_data[col] = le.fit_transform(train_data[col])
+
+        for label in np.unique(test_data[col]):
+            if label not in le.classes_:
+                le.classes_ = np.append(le.classes_, label)
+        test_data[col] = le.transform(test_data[col])
+    return train_data, test_data
+
+------------------------------------------------
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+데이터 전처리 함수 적용: 범주화, 결측값 처리, 레이블 인코딩2
+
+train_origin = pd.read_csv('train.csv')
+train_data, valid_data = train_test_split(train_origin, test_size=0.2, random_state=42, stratify=train_origin['target'])
+
+country_groups = categorize_countries(train_data)
+train_origin, valid_data = preprocess_data(train_data, country_groups), preprocess_data(valid_data, country_groups)
+imputed_train_occupation = impute_missing_occupation(train_data)
+
+columns_to_impute = ['occupation', 'workclass', 'native.country']
+imputed_train_data, imputed_valid_data = impute_missing_values(train_data, valid_data, columns_to_impute)
+encoded_train, encoded_valid = label_encoding(imputed_train_data, imputed_valid_data)
+
+------------------------------------------------
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+DBSCAN을 이용한 이상치 제거 및 데이터셋 준비
+
+from sklearn.cluster import DBSCAN
+
+D_encoded_train = encoded_train.copy()
+D_encoded_valid = encoded_valid.copy()
+
+X_sample_scaled = D_encoded_train[['capital.gain', 'capital.loss']]
+
+dbscan = DBSCAN(eps=0.5, min_samples=4)
+clusters_sample = dbscan.fit_predict(X_sample_scaled)
+
+D_encoded_train['clusters'] = clusters_sample
+sample_no_outliers = D_encoded_train[D_encoded_train['clusters'] != -1]
+
+train_y = sample_no_outliers['target']
+train_x = sample_no_outliers.drop(['ID','target','education.num','clusters'],axis = 1)
+
+valid_y = D_encoded_valid['target']
+valid_x = D_encoded_valid.drop(['ID','target','education.num'],axis = 1)
+
+------------------------------------------------
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+BorderlineSMOTE를 활용한 클래스 불균형 처리와 Extra Trees Classifier 교차 검증
+
+- BorderlineSMOTE 는 imbalanced-learn 라이브러리의 오버샘플링 기법으로, 적은 클래스의 데이터를 생성할 떄 사용된다.
+-> 클래스간 경계 근처의 데이터가 분류 성능에 더 중요한 역할을 하기 떄문에. 경계에서 멀리 떨어져 있는 데이터는 오히려 잘못된 학습을 유도할 수 있다.
+
+from imblearn.over_sampling import BorderlineSMOTE
+from sklearn.ensemble import ExtraTreesClassifier
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import cross_val_score
+from sklearn.metrics import make_scorer, f1_score
+
+# StandardScaler를 통한 전처리(표준화 스케일링 - 평균을 0, 표준편차를 1로 조정하여 정규화)
+scaler = StandardScaler()
+train_x[['capital.gain', 'capital.loss','age-hours']] = scaler.fit_transform(train_x[['capital.gain', 'capital.loss','age-hours']])
+valid_x[['capital.gain', 'capital.loss','age-hours']] = scaler.fit_transform(valid_x[['capital.gain', 'capital.loss','age-hours']])
+
+# BorderSMOTE를 통한 데이터의 증강(소수 클래스의 경계 영역에서 새로운 샘플을 생성하여 클래스간 불균형 문제를 해결)
+Bordersmote = BorderlineSMOTE(random_state=24)
+x_Bordersmote, y_Bordersmote = Bordersmote.fit_resample(train_x, train_y)
+
+extra = ExtraTreesClassifier(random_state=24)
+f1_scorer = make_scorer(f1_score, average='macro')
+cross_val_scores = cross_val_score(extra, x_Bordersmote, y_Bordersmote, cv=3, scoring=f1_scorer)
+
+mean_f1_score = np.mean(cross_val_scores)
+print("Mean Cross-Validation F1 Score:", mean_f1_score)
+
+------------------------------------------------
+
+Mean Cross-Validation F1 Score: 0.8646546175425667
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+데이터 특성 상호작용 시각화
+
+result = pd.concat([train_x, train_y], axis=1)
+plt.figure(figsize=(12, 6))
+sns.heatmap(result.corr(), annot=True, cmap="YlGnBu")
+plt.title("Relationship between Gender and Occupation (Heatmap)")
+plt.show()
+
+------------------------------------------------
+
+*** 상관관계 해석의 주의사항
+    
+    상관관계가 인과관계를 의미하지는 않는다. 따라서 한 변수가 다른 변수를 유발한다고 결론 지을 수 없다.
+    선형적인 관계만 고려한다. 비선형적인 관계는 파악하기 어렵다.
+    
+age-hours와 hours.per.week는 높은 양의 상관관계를 보이는데, 이는 age-hours가 hours.per.week의 특성을 활용해 만든 변수이기 때문이다.
+해당 두 피처는 타겟 변수와도 높은 상관 관계를 보인다.
+
+나머지 기타 피처들은 타겟 변수와 중간 - 약한 상관관계를 보인다.
+이는 각 변수가 타겟 변수에 미치는 영향이 덜 명확하거나, 변수들간의 관계가 복잡하게 얽혀있음을 의미한다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+모델 예측 결과 시각화: 혼동 행렬
+
+- 혼동행렬은 분류 모델의 성능을 평가하기 위해 자주 사용되는 도구이다.
+
+- 구조 : 행은 실제 클래스를 나타낸다.
+        열은 모델이 예측한 클래스를 나타낸다.
+        클래스는 0(50K미만)과 1(50K이상)으로 구분된다.
+        
+- 각 셀의 의미
+        TP(True Positive) : 모델이 클래스1(50이상)을 정확하게 예측한 경우의 수
+        FP(False Positive) : 모델이 클래스0(50미만)을 잘못하여 클래스1(50이상)으로 예측한 경우의 수
+        TN(True Negative) : 모델이 클래스0(50미만)을 정확하게 예측한 경우의 수
+        FN(False Negative) : 모델이 클래스 1(50이상)을 잘못예측하여 클래스0(50미만)으로 예측한 경우의 수
+        
+- 모델의 성능평가
+        정확도(Accuracy) : TP + TN / 전체 -> 전체중에 올바르게 예측된 비율
+        정밀도(Precision) : 클래스 1로 예측된 샘플중 실제 클래스 1인 샘플의 비율 TP / (TP + FP)
+        재현율(Recall) : 실제 클래스 1인 샘플 중에서 클래스1로 올바르게 예측된 샘플의 비율 TP / (TP + FN)
+        F1점수 : 정밀도와 재현율의 조화평균
+
+
+from sklearn.model_selection import cross_val_predict
+from sklearn.ensemble import ExtraTreesClassifier
+from sklearn.metrics import confusion_matrix
+
+# cross_val_predict 함수를 사용하여 교차 검증 과정 중 각 샘플에 대한 예측값을 생성한다.
+# 이 방법은 각 샘플이 다른 폴드에 의해 예측되어, 모델의 일반화 능력을 평가하는데 유용하다.
+extra = ExtraTreesClassifier(random_state=24)
+binary_pred = cross_val_predict(extra, x_Bordersmote, y_Bordersmote, cv=3)
+
+# Confusion Matrix 생성 및 시각화
+cm = confusion_matrix(y_Bordersmote, binary_pred)
+plt.figure(figsize=(5, 5))
+plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Greens)
+plt.title('Confusion Matrix', size=15)
+plt.colorbar()
+classes = ['0 - <50k', '1 - >50k']
+tick_marks = np.arange(len(classes))
+plt.xticks(tick_marks, classes, rotation=45)
+plt.yticks(tick_marks, classes)
+plt.ylabel('True label')
+plt.xlabel('Predicted label')
+
+# Matrix 안의 숫자 출력
+thresh = cm.max() / 2.
+for i, j in np.ndindex(cm.shape):
+    plt.text(j, i, cm[i, j], horizontalalignment="center",
+             color="white" if cm[i, j] > thresh else "black")
+
+plt.show()
+
+------------------------------------------------
+
+TN : 2249
+FP : 332
+FN : 356
+TP : 2225
+
+전체 모델중의 688건이 예측이 틀렸다.
+모델의 성능은 TP와 TN이 상대적으로 높고, FP와 FN이 낮기 때문에 비교적 좋다고 평가된다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+ROC 곡선을 통한 이진 분류 모델 평가
+
+from sklearn.metrics import roc_curve, roc_auc_score
+
+# AUC ROC를 계산하고 그래프를 그리는 함수
+def calculate_and_plot_roc(y_true, y_score):
+    fpr, tpr, _ = roc_curve(y_true, y_score)
+    auc = roc_auc_score(y_true, y_score)
+
+    plt.plot(fpr, tpr, color='darkorange', label=f'AUC = {auc:.2f}')
+    plt.plot([0, 1], [0, 1], color='navy', linestyle='--')
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title('ROC Curve')
+    plt.legend(loc='lower right')
+    plt.show()
+
+    return auc
+
+# AUC ROC를 계산하고 반환하기
+# calculate_and_plot_roc 함수에는 두 인자가 필요하다. 먼저 y_Bordersmote는 실제 타겟 변수의 값, binary_pred는 모델이 예측한 이진 분류 결과이다.
+auc_value = calculate_and_plot_roc(y_Bordersmote, binary_pred)
+
+# 반환된 AUC ROC 값 출력
+print(f'Returned AUC ROC Value: {auc_value}')
+
+------------------------------------------------
+
+Returned AUC ROC Value: 0.865943432777993
+
+AUC는 ROC 곡선 아래의 면적을 나타내는 지표로, 모델의 분류 성능을 평가하는 데 사용한다.
+True Positive Rate에 대한 False Positive Rate의 변화를 나타낸다
+
+면적은 0과 1 사이의 값을 가지며, 1에 가까울 수록 모델의 성능이 우수하다.
+
+0.5 -> 무작위
+0.7-0.8 -> 어느정도 성능이 있음
+0.8-0.9 -> 좋은 성능
+0.9이상 -> 우수한 성능
+
+해당 모델은 좋은 성능을 보이고 있는 것으로 판단된다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+필요한 라이브러리(Library) 불러오기
+
+import numpy as np
+import pandas as pd
+import warnings
+warnings.filterwarnings("ignore")
+
+from sklearn.model_selection import StratifiedKFold, train_test_split
+from sklearn.metrics import f1_score
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.impute import SimpleImputer
+from sklearn.cluster import DBSCAN
+from imblearn.over_sampling import BorderlineSMOTE
+
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.ensemble import VotingClassifier
+import lightgbm as lgb
+
+# optuna는 하이퍼파라미터 최적화 라이브러리로 머신러닝 모델을 훈련할 때 하이퍼파라미터를 자동으로 탐색하고 최적의 값을 찾는다.
+# tqdm은 진행률을 표시하는 라이브러리이다.
+import optuna
+from tqdm import tqdm
+
+pd.set_option('mode.chained_assignment',  None) 
+
+------------------------------------------------
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+피처 엔지니어링 및 국가 카테고리 함수 정의
+
+# 1. 피처 엔지니어링
+def preprocess_data(df, country_groups):
+
+    df['education'].replace(['Doctorate', 'Prof-school'], 'highEducation', inplace=True)
+    df['education'].replace(['Assoc-acdm', 'Assoc-voc'], 'SomeHigherEd', inplace=True)
+    df['education'].replace(['Preschool', '10th', '11th', '12th', '1st-4th', '5th-6th', '7th-8th', '9th'], 'LowEducation', inplace=True)
+
+    df['marital.status'].replace(['Never-married', 'Married-spouse-absent'], 'UnmarriedStatus', inplace=True)
+    df['marital.status'].replace(['Married-AF-spouse', 'Married-civ-spouse'], 'Married', inplace=True)
+    df['marital.status'].replace(['Separated', 'Divorced'], 'MarriageEnded', inplace=True)
+
+    df['age-hours'] = df['age'] * df['hours.per.week']
+    df['age'] = pd.cut(np.log(df['age']), 30)
+
+    for group in country_groups:
+        df['native.country'].replace(country_groups[group], group, inplace=True)
+
+    return df
+
+# 2. 국가 카테고리화 함수 정의
+def categorize_countries(df):
+    country_groups = {0: [], 1: [], 2: [], 3: [], 4: []}
+    for country in df['native.country'].unique():
+        country_data = df[df['native.country'] == country]['target']
+        proportion = sum(country_data) / country_data.count()
+        
+        if proportion == 0.0:
+            country_groups[0].append(country)
+        elif 0.0 < proportion <= 0.2:
+            country_groups[1].append(country)
+        elif 0.2 < proportion <= 0.4:
+            country_groups[2].append(country)
+        elif 0.4 < proportion <= 0.6:
+            country_groups[3].append(country)
+        else:
+            country_groups[4].append(country)
+    
+    return country_groups
+
+------------------------------------------------
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+결측치 처리 및 라벨 인코딩을 통한 데이터셋 준비 및 직업 예측 함수 정의
+
+# 1. 결측치 및 비결측치 직업 데이터 분리
+def split_missing_non_missing_occupation(df, occupation_col='occupation'):
+
+    null_occupation = df[df[occupation_col].isnull()]
+    notnull_occupation = df[~df[occupation_col].isnull()]
+    
+    return null_occupation, notnull_occupation
+
+# 2. 라벨 인코딩 함수 정의
+def label_encode_columns(df_with_occupation, df_missing_occupation, exclude_features, show_occupation_classes=None):
+    
+    encoded_non_missing_occupation = df_with_occupation.copy()
+    encoded_missing_occupation = df_missing_occupation.copy()
+    occupation_classes = None  # 기본값 설정
+
+    for col in list(encoded_missing_occupation.select_dtypes(['object', 'category']).columns):
+        if col in exclude_features:
+            continue
+
+        le = LabelEncoder()
+        encoded_non_missing_occupation[col] = le.fit_transform(encoded_non_missing_occupation[col])
+
+        if show_occupation_classes and col == 'occupation':
+            occupation_classes = le.classes_  # 직업 칼럼의 classes_ 추출
+
+        for label in np.unique(encoded_missing_occupation[col]):
+            if label not in le.classes_:
+                le.classes_ = np.append(le.classes_, label)
+
+        encoded_missing_occupation[col] = le.transform(encoded_missing_occupation[col])
+
+    return encoded_non_missing_occupation, encoded_missing_occupation, occupation_classes
+
+# 3. 데이터셋 준비 함수 정의
+def prepare_datasets(df_with_occupation, df_missing_occupation, exclude_features):
+    y_train = df_with_occupation['occupation']
+    x_train = df_with_occupation.drop(columns=exclude_features)
+
+    x_val = df_missing_occupation.drop(columns=exclude_features)
+    
+    return x_train, y_train, x_val
+
+# 4. 결측치 직업 예측 함수 정의
+def predict_missing_occupation(x_train, y_train, x_val, random_state=24):
+    rf = RandomForestClassifier(random_state=random_state)
+    rf.fit(x_train, y_train)
+    y_pred = rf.predict(x_val)
+    return y_pred
+
+# 5. 결측치 보간 함수 정의
+def impute_missing_values(train, valid, columns_to_impute):
+    imputed_train_data = train.copy()
+    imputed_valid_data = valid.copy()
+
+    imputer = SimpleImputer(strategy='most_frequent')
+    imputed_train_data[columns_to_impute] = imputer.fit_transform(imputed_train_data[columns_to_impute])
+    imputed_valid_data[columns_to_impute] = imputer.transform(imputed_valid_data[columns_to_impute])
+
+    return imputed_train_data, imputed_valid_data
+
+------------------------------------------------
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+DBSCAN 클러스터링을 통한 이상치 제거와 데이터 전처리, 피처 스케일링 함수 정의
+
+# 1. DBSCAN 클러스터링 및 전처리 함수 정의
+def preprocess_and_cluster(df, cluster_features):
+    df_copy = df.copy()
+    
+    X_sample_scaled = df_copy[cluster_features]
+
+    dbscan = DBSCAN(eps=0.5, min_samples=4)
+    clusters_sample = dbscan.fit_predict(X_sample_scaled)
+
+    df_copy['clusters'] = clusters_sample
+    df_no_outliers = df_copy[df_copy['clusters'] != -1]
+
+    return df_no_outliers
+
+# 2. 전체 데이터셋 예측 함수 정의
+def predict_prepare_datasets(df_no_outliers, df_valid, exclude_features):
+    train_y = df_no_outliers['target']
+    train_x = df_no_outliers.drop(columns=exclude_features + ['clusters'])
+
+    valid_y = df_valid['target']
+    valid_x = df_valid.drop(columns=exclude_features)
+    
+    return train_x, train_y, valid_x, valid_y
+
+# 3. 피처 스케일링 함수 정의
+def scale_features(train_data, valid_data, features):
+    scaler = StandardScaler()
+    
+    train_data_scaled = train_data.copy()
+    train_data_scaled[features] = scaler.fit_transform(train_data_scaled[features])
+
+    valid_data_scaled = valid_data.copy()
+    valid_data_scaled[features] = scaler.transform(valid_data_scaled[features])
+
+    return train_data_scaled, valid_data_scaled
+
+------------------------------------------------
+
+valid 데이터에 대해서는 transform을 해야하는데 fit_transform을 했다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+occupation 피처 결측값 예측(train)
+
+train_origin = pd.read_csv('train.csv')
+
+# 1. 훈련 데이터와 검증 데이터로 나누기
+train_data, valid_data = train_test_split(train_origin, test_size=0.2, random_state=42, stratify=train_origin['target'])
+
+# 2. 국가 카테고리 그룹화
+country_groups = categorize_countries(train_data)
+
+# 3. 데이터 전처리
+train_origin, valid_data = preprocess_data(train_data, country_groups), preprocess_data(valid_data, country_groups)
+
+# 4. 결측 직업과 비결측 직업으로 데이터 분리(train)
+missing_occupation, non_missing_occupation = split_missing_non_missing_occupation(train_origin)
+
+# 5. 라벨 인코딩 제외 특성 정의
+encoding_exclude_features = ['workclass']
+
+# 6. 결측 직업과 비결측 직업을 라벨 인코딩하여 처리 (직업 특성 제외)
+encoded_non_missing_occupation, encoded_missing_occupation, occupation_classes = label_encode_columns(non_missing_occupation, missing_occupation, encoding_exclude_features, show_occupation_classes=True)
+
+# 7. 제외할 특성 정의 (결측값(workclass), 학습에 사용x (ID), 종속변수(occupation))
+exclude_features = ['occupation', 'workclass', 'ID']
+
+# 8. 훈련 데이터셋, 레이블, 검증 데이터셋 준비
+x_train, y_train, x_val = prepare_datasets(encoded_non_missing_occupation, encoded_missing_occupation, exclude_features)
+
+# 9. 결측 직업 예측
+y_pred_real = predict_missing_occupation(x_train, y_train, x_val)
+
+# 10. 예측된 결측 직업을 원본 데이터에 반영
+missing_occupation['occupation'] = y_pred_real
+
+# 11. 직업 클래스를 문자열에서 인덱스로, 인덱스에서 문자열로 변환하는 딕셔너리 생성
+occupation_num_to_str = {index: occupation for index, occupation in enumerate(occupation_classes.tolist())}
+occupation_str_to_num = {string: num for num, string in occupation_num_to_str.items()}
+
+# 12. 예측된 결측 직업을 문자열로 변환
+missing_occupation['occupation'] = missing_occupation['occupation'].map(occupation_num_to_str)
+
+------------------------------------------------
+
+country_groups = categorize_countries(train_data)
+
+그룹화에 필요한 데이터는 train_origin이 아니라 train_data를 사용했어야 한다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+occupation 피처 결측값 예측(valid)
+
+랜덤 포레스트를 통해 검증셋의 occupation 결측값을 예측
+
+# 결측 직업이 채워진 훈련 데이터셋 생성(train)
+train_imputed_occupation = pd.concat([non_missing_occupation, missing_occupation])
+
+# 결측 직업과 비결측 직업으로 데이터 분리(valid)
+valid_null_occupation, valid_notnull_occupation = split_missing_non_missing_occupation(valid_data)
+
+# 비결측 직업과 결측 직업을 라벨 인코딩하여 처리하고 직업 클래스 확인은 생략
+encoded_non_missing_occupation, encoded_missing_occupation, occupation_classes = label_encode_columns(train_imputed_occupation, valid_null_occupation, encoding_exclude_features, show_occupation_classes=False)
+
+라벨 인코딩에 사용하는 데이터가 train_imputed_occupation(train에서 결측치를 채운 데이터셋) + valid_null_occupation(검증셋에서 직업이 null인 데이터셋)
+
+# 제외할 특성 정의
+exclude_features = ['occupation', 'workclass','ID']
+
+# 훈련 데이터셋, 레이블, 검증 데이터셋 준비
+x_train, y_train, x_val = prepare_datasets(encoded_non_missing_occupation, encoded_missing_occupation, exclude_features)
+
+# 결측 직업 예측
+y_pred_real = predict_missing_occupation(x_train, y_train, x_val)
+
+# 예측된 결측 직업을 원본 데이터에 반영
+valid_null_occupation['occupation'] = y_pred_real
+
+# 직업 클래스를 인덱스에서 문자열로 변환하는 딕셔너리를 사용하여 예측된 결측 직업을 문자열로 변환
+valid_null_occupation['occupation'] = valid_null_occupation['occupation'].map(occupation_num_to_str)
+
+------------------------------------------------
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+SimpleImputer 기법으로 workclass 결측치 보간(train / valid)
+
+# 결측이 아닌 직업을 가진 검증 데이터 추출
+valid_notnull_occupation = valid_data[~valid_data['occupation'].isnull()]
+
+# 결측 직업을 가진 검증 데이터와 결측이 아닌 데이터를 합치고 정렬(valid)
+valid_all = pd.concat([valid_notnull_occupation, valid_null_occupation]).sort_index()
+
+# 결측값 보간 대상 특성 정의
+columns_to_impute = ['workclass']
+
+# 결측이 채워진 훈련 데이터와 검증 데이터 생성
+imputed_train_data, imputed_valid_data = impute_missing_values(train_imputed_occupation, valid_all, columns_to_impute)
+
+# 라벨 인코딩을 위한 훈련 데이터와 검증 데이터 생성 (제외할 특성이 없으므로 exclude_features=[]로 설정하고, 직업 클래스 확인은 생략)
+encoded_train, encoded_valid, _ = label_encode_columns(imputed_train_data, imputed_valid_data, exclude_features=[], show_occupation_classes=False)
+
+------------------------------------------------
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+이상치 제거(Dascan 기법)와 표준화(StandardScaler 활용)를 통한 데이터 전처리 (train / valid)
+
+# 1. 클러스터링할 특성 정의
+cluster_features = ['capital.gain', 'capital.loss']
+
+# 2. 전처리 및 클러스터링을 수행하여 이상치 제거된 훈련 데이터 생성
+sample_no_outliers_train = preprocess_and_cluster(encoded_train, cluster_features)
+
+# 3. 제외할 특성 정의
+exclude_features = ['ID', 'target', 'education.num', 'fnlwgt']
+
+# 4. 전처리 및 클러스터링된 훈련 데이터와 라벨 인코딩된 검증 데이터를 사용하여 훈련 데이터셋 및 검증 데이터셋 생성
+train_x, train_y, valid_x, valid_y = predict_prepare_datasets(sample_no_outliers_train, encoded_valid, exclude_features)
+
+# 5. 스케일링할 특성 정의
+features_to_scale = ['capital.gain', 'capital.loss', 'age-hours']
+
+# 6. 특정 특성들을 스케일링하여 훈련 데이터와 검증 데이터에 적용
+scaled_train_x, scaled_valid_x = scale_features(train_x, valid_x, features_to_scale)
+
+------------------------------------------------
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+*** LightGBM 모델의 성능 향상을 위한 Hyperparameter Tuning 및 Stratified K-Fold
+
+LightGBM을 사용하여 분류 문제를 해결하기 위해, Optuna 라이브러리를 사용하여 모델의 하이퍼파라미터를 최적화하는 과정을 구현해보겠습니다.
+
+LGBM_train_x = scaled_train_x.copy()
+LGBM_train_y = train_y.copy()
+
+# scaled_train_x와 scaled_valid_x는 특성 데이터이다. 이미 스케일링 처리가 되어있다.
+# train_y와 valid_y는 레이블 데이터로 0과 1의 카테고리 값을 가지고 있다.
+
+# 1. 데이터를 StratifiedKFold로 분할
+fold_num = 5
+skf = StratifiedKFold(n_splits=fold_num, shuffle=True, random_state=42)
+
+# 2. Objective 함수 설정
+def objective(trial):
+    params = {
+        'learning_rate': trial.suggest_loguniform('learning_rate', 0.01, 0.5),
+        'colsample_bytree': trial.suggest_uniform('colsample_bytree', 0.5, 1.0),
+        'n_estimators': 100,
+        'max_depth': trial.suggest_int('max_depth', 5, 20),
+        'num_leaves': trial.suggest_int('num_leaves', 20, 100),
+        'min_child_samples': trial.suggest_int('min_child_samples', 5, 100),
+        'reg_alpha': trial.suggest_loguniform('reg_alpha', 1e-5, 10.0),
+        'reg_lambda': trial.suggest_loguniform('reg_lambda', 1e-5, 10.0),
+        'verbose': -1
+    }
+# Optuna를 통해 하이퍼파라미터를 최적화에는 objective 함수가 사용된다.
+
+
+    # 폴드별 Macro F1 스코어를 저장할 리스트
+    macro_f1_scores = []
+
+    # 각 폴드에 대해서 반복.
+    for train_idx, valid_idx in skf.split(LGBM_train_x, LGBM_train_y):
+        X_train_fold, X_valid_fold = LGBM_train_x.iloc[train_idx], LGBM_train_x.iloc[valid_idx]
+        y_train_fold, y_valid_fold = LGBM_train_y.iloc[train_idx], LGBM_train_y.iloc[valid_idx]
+
+        # SMOTE 적용
+        # BorderlineSMOTE는 불균형한 데이터셋을 처리하기 위핸 오버샘플링 기법(소수 클래스를 증가)
+        smote = BorderlineSMOTE(random_state=24)
+        X_train_smote, y_train_smote = smote.fit_resample(X_train_fold, y_train_fold)
+
+        model = lgb.LGBMClassifier(**params)
+        model.fit(X_train_smote, y_train_smote)
+        predictions = model.predict(X_valid_fold)
+
+        # Macro F1 계산
+        macro_f1 = f1_score(y_valid_fold, predictions, average='macro')
+        macro_f1_scores.append(macro_f1)
+
+    return np.mean(macro_f1_scores)
+
+------------------------------------------------
+
+StratifiedKFold에서는 n_splits 파라미터를 통해 데이터를 지정된 폴드수 대로 분할한다.
+split 메서드를 통해 학습 데이터와 검증 데이터의 인덱스를 분할하고, iloc 메서드를 통해 학습 데이터와 검증 데이터를 각각 y_train_fold, y_valid_fold로 할당한다.
+
+BorderlineSMOTE를 사용하여 오버샘플링을 수행하며, fit_resample 메서드를 통해 학습 데이터에만 SMOTE를 적용한다.
+**params 를 통해 앞서 정의한 파라미터를 전달한다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+Optuna를 활용한 LightGBM Hyperparameter 튜닝 및 Stratified K-Fold 교차 검증
+
+LightGBM의 Optuna를 통해 여러 폴드에서의 하이퍼파라미터 최적화 모델학습을 수행하는 함수를 정의
+
+Optuna Sampler - TPESampler를 사용하여 최적화 샘플러를 생성. 이 샘플러는 효율적인 매개변수 탐색을 위해 사용된다.
+Optuna Study - optuna.create_study() 함수를 사용하여 새로운 study 객체를 생성.
+    이 객체는 최적화 과정에서의 여러 시도들을 관리하며, (study_name, direction, sampler) 등의 인자를 포함한다.
+    direction='maximize'를 통해 목표 메트릭을 최대화 하려 한다.
+Optuna Study 최적화 - study.optimize() 메서드를 통해 objective 함수를 최적화 한다.
+    n_trials=10을 통해 총 10번의 시도를 수행한다는 것을 의미
+최적 매개변수 추출 - study.best_params를 통해 최적화 과정에서 찾아낸 최적의 매개변수 값을 가져온다.
+LightGBM 모델 생성 및 학습 - 최적화된 매개변수를 사용하여 LightGBM 분류 모델을 생성
+    **lgbm_best_params를 사용하여 최적화된 매개변수를 모델에 적용
+
+from lightgbm import early_stopping
+
+# 3. Optuna 최적화
+def optimize_lgbm_with_optuna(LGBM_train_x, LGBM_train_y, fold_num=5):
+    predictions_of_all_folds = []
+    macro_f1_scores = []
+
+    for fold, (train_idx, valid_idx) in enumerate(tqdm(StratifiedKFold(n_splits=fold_num, shuffle=True, random_state=42).split(LGBM_train_x, LGBM_train_y), total=fold_num)):
+        X_train_fold, X_valid_fold = LGBM_train_x.iloc[train_idx], LGBM_train_x.iloc[valid_idx]
+        y_train_fold, y_valid_fold = LGBM_train_y.iloc[train_idx], LGBM_train_y.iloc[valid_idx]
+
+        # BorderlineSMOTE 적용
+        smote = BorderlineSMOTE(random_state=42)
+        X_train_smote, y_train_smote = smote.fit_resample(X_train_fold, y_train_fold)
+
+        sampler = optuna.samplers.TPESampler(seed=42)
+        study = optuna.create_study(
+            study_name=f'lgbm_parameter_optuna_fold_{fold}',
+            direction='maximize',
+            sampler=sampler,
+        )
+        study.optimize(objective, n_trials=10)
+
+        lgbm_best_params = study.best_params
+
+        model = lgb.LGBMClassifier(**lgbm_best_params)
+        model.fit(X_train_smote, y_train_smote, eval_set=[(X_valid_fold, y_valid_fold)], callbacks=[early_stopping(stopping_rounds=50)])
+
+        predictions = model.predict(X_valid_fold)
+        predictions_of_all_folds.append(predictions)
+
+        # Macro F1 스코어 계산 및 출력
+        macro_f1 = f1_score(y_valid_fold, predictions, average='macro')
+        macro_f1_scores.append(macro_f1)
+
+    avg_macro_f1 = np.mean(macro_f1_scores)
+    return predictions_of_all_folds, macro_f1_scores, avg_macro_f1, lgbm_best_params
+
+predictions, macro_f1_scores, avg_macro_f1, lgbm_best_params = optimize_lgbm_with_optuna(LGBM_train_x, LGBM_train_y, fold_num=5)
+
+print('각 폴드의 Macro F1 스코어:', macro_f1_scores, 
+      '\n평균 Macro F1 스코어:', avg_macro_f1, 
+      '\n최적의 하이퍼파라미터:', lgbm_best_params)
+      
+------------------------------------------------
+
+valid_0's binary_logloss: 0.322287
+각 폴드의 Macro F1 스코어: [0.7997280983196475, 0.7960189768976897, 0.7774267418103035, 0.7983507999605769, 0.8091538875437181] 
+평균 Macro F1 스코어: 0.7961357009063871 
+최적의 하이퍼파라미터: {'learning_rate': 0.23628864184236406, 'colsample_bytree': 0.6523068845866853, 'max_depth': 6, 'num_leaves': 75, 'min_child_samples': 47, 'reg_alpha': 5.397956855996442e-05, 'reg_lambda': 0.009355380606452175}
+
+각 폴드에서 얻어진 이진불류 결과를 나타낸다.
+각 배열은 해당 폴드에서의 예측값을 나타내며, 이를 통해 모델이 얼마나 일관되게 성능을 발휘하는지 확인할 수 있다.
+
+각 폴드에서 Macro F1 스코어는 0.76에서 0.8 사이의 값으로, 모델이 클래스 불균형을 고려하여 양호한 성능을 나타내고 있음을 의미한다. Macro F1 스코어는 각 클래스의 F1 스코어를 동등하게 고려하기 때문에, 불균형한 데이터셋에서 모델의 성능을 평가하는 적합한 지표이다.
+
+평균 스코어는 0.788로, 모델이 전체적으로 안정적인 성능을 보이고 있음을 나타낸다. 이는 모델이 두 클래스를 고르게 예측하는 데 효과적임을 의미한다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+Optuna를 활용한 Gradient Boosting Hyperparameter 튜닝과 Stratified K-Fold 교차 검증
+
+-> GradientBoosting 모델의 하이퍼파라미터 최적화를 수행하고 이를 LightBGM 모델과 결과 비교
+
+GB_train_x = scaled_train_x.copy()
+GB_train_y = train_y.copy()
+
+# 1. Objective 함수 설정
+def objective(trial):
+    params = {
+        'learning_rate': trial.suggest_loguniform('learning_rate', 0.01, 0.5),
+        'loss': trial.suggest_categorical('loss', ['log_loss', 'exponential']),
+        'max_depth': trial.suggest_int('max_depth', 1, 6),
+        'min_samples_leaf': trial.suggest_int('min_samples_leaf', 1, 20),
+        'min_samples_split': trial.suggest_int('min_samples_split', 2, 20),
+        'n_estimators': 100,
+        'subsample': trial.suggest_uniform('subsample', 0.1, 1.0),
+    }
+
+    macro_f1_scores = []
+
+    for train_idx, valid_idx in skf.split(GB_train_x, GB_train_y):
+        X_train_fold, X_valid_fold = GB_train_x.iloc[train_idx], GB_train_x.iloc[valid_idx]
+        y_train_fold, y_valid_fold = GB_train_y.iloc[train_idx], GB_train_y.iloc[valid_idx]
+
+        smote = BorderlineSMOTE(random_state=42)
+        X_train_smote, y_train_smote = smote.fit_resample(X_train_fold, y_train_fold)
+
+        model = GradientBoostingClassifier(**params)
+
+        model.fit(X_train_smote, y_train_smote)
+        predictions = model.predict(X_valid_fold)
+
+        macro_f1 = f1_score(y_valid_fold, predictions, average='macro')
+        macro_f1_scores.append(macro_f1)
+
+    return np.mean(macro_f1_scores)
+
+# 2. Optuna 최적화
+def optimize_gb_with_optuna(GB_train_x, GB_train_y, fold_num=5):
+    predictions_of_all_folds = []
+    macro_f1_scores = []
+    
+    for fold, (train_idx, valid_idx) in enumerate(skf.split(GB_train_x, GB_train_y)):
+        X_train_fold, X_valid_fold = GB_train_x.iloc[train_idx], GB_train_x.iloc[valid_idx]
+        y_train_fold, y_valid_fold = GB_train_y.iloc[train_idx], GB_train_y.iloc[valid_idx]
+
+        smote = BorderlineSMOTE(random_state=42)
+        X_train_smote, y_train_smote = smote.fit_resample(X_train_fold, y_train_fold)
+
+        sampler = optuna.samplers.TPESampler(seed=42)
+        study = optuna.create_study(
+            study_name=f'gb_parameter_optuna_fold_{fold}',
+            direction='maximize',
+            sampler=sampler,
+        )
+        study.optimize(objective, n_trials=10)
+
+        gb_best_params = study.best_params
+
+        model = GradientBoostingClassifier(**gb_best_params)
+        model.fit(X_train_smote, y_train_smote)
+
+        predictions = model.predict(X_valid_fold)
+        predictions_of_all_folds.append(predictions)
+
+        macro_f1 = f1_score(y_valid_fold, predictions, average='macro')
+        macro_f1_scores.append(macro_f1)
+
+    avg_macro_f1 = np.mean(macro_f1_scores)
+    return predictions_of_all_folds, macro_f1_scores, avg_macro_f1, gb_best_params
+
+predictions, macro_f1_scores, avg_macro_f1, gb_best_params = optimize_gb_with_optuna(GB_train_x, GB_train_y, fold_num=5)
+
+print('n각 폴드의 Macro F1 스코어:', macro_f1_scores, 
+      '\n평균 Macro F1 스코어:', avg_macro_f1, 
+      '\n최적의 하이퍼파라미터:', gb_best_params)
+
+------------------------------------------------
+
+n각 폴드의 Macro F1 스코어: [0.7947431781701445, 0.7920731707317072, 0.7565717645082723, 0.7735723771580345, 0.8079989536252525] 
+평균 Macro F1 스코어: 0.7849918888386822 
+최적의 하이퍼파라미터: {'learning_rate': 0.23628864184236406, 'loss': 'log_loss', 'max_depth': 5, 'min_samples_leaf': 9, 'min_samples_split': 4, 'subsample': 0.5456592191001431}
+
+GradientBoosting에서의 각 폴드에서 Macro F1은 0.75에서 0.8사이로 균형잡힌 성능을 보인다.
+평균은 0.781로 모델이 불균형함에도 일관성 있게 성능을 발휘하고 있다.
+LightBGM은 0.788로 조금 더 높은 성능을 보인다.
+
+두 모델 모두 StrarifiedKFold와 SMOTH를 활용하여 클래스 불균형 문제를 효과적으로 처리했으며, Optuna를 사용한 하이퍼파라미터 최적화를 통해 성능을 극대화 하였다. LightBGM가 약간 더 높은 평균 Macro F1 스코어를 달성했다.
+
+LightBGM는 일반적으로 더 빠른 학습 속도와 높은 유연성을 제공하며, GradientBoosting는 일반적으로 구현이 간단하고 해석이 쉽다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+Hard Voting을 활용한 Gradient Boosting과 LightGBM 앙상블 학습 및 Stratified K-Fold 교차 검증
+
+두 모델을 Hard Voting 방식으로 앙상블하여 교차 검증을 수행해 보자.
+
+hard_train_x = scaled_train_x.copy()
+hard_train_y = train_y.copy()
+
+fold_num = 5 
+skf = StratifiedKFold(n_splits=fold_num, shuffle=True, random_state=42)
+
+gb_classifier = GradientBoostingClassifier(**gb_best_params)
+lgbm_classifier = lgb.LGBMClassifier(**lgbm_best_params)
+
+# 모델들을 VotingClassifier로 결합 (Hard Voting)
+voting_classifier = VotingClassifier(
+    estimators=[('gb', gb_classifier), ('lgbm', lgbm_classifier)],
+    voting='hard'
+)
+
+# 각 fold 별로 SMOTE와 모델 학습을 수행하고 Macro F1 스코어 계산
+macro_f1_scores = []
+
+for fold, (train_idx, valid_idx) in enumerate(skf.split(hard_train_x, hard_train_y)):
+    X_train_fold, X_valid_fold = hard_train_x.iloc[train_idx], hard_train_x.iloc[valid_idx]
+    y_train_fold, y_valid_fold = hard_train_y.iloc[train_idx], hard_train_y.iloc[valid_idx]
+
+    smote = BorderlineSMOTE(random_state=42)
+    X_train_smote, y_train_smote = smote.fit_resample(X_train_fold, y_train_fold)
+
+    voting_classifier.fit(X_train_smote, y_train_smote)
+    predictions = voting_classifier.predict(X_valid_fold)
+
+    macro_f1 = f1_score(y_valid_fold, predictions, average='macro')
+    macro_f1_scores.append(macro_f1)
+
+# 모든 폴드의 Macro F1 스코어 출력
+for fold, macro_f1 in enumerate(macro_f1_scores):
+    print(f"Fold {fold + 1} Macro F1 Score: {macro_f1}")
+
+# 모든 폴드의 Macro F1 스코어 평균 출력
+avg_macro_f1 = np.mean(macro_f1_scores)
+print(f"Average Macro F1 Score: {avg_macro_f1}")
+
+------------------------------------------------
+
+Fold 1 Macro F1 Score: 0.8250683994528043
+Fold 2 Macro F1 Score: 0.7954167045076136
+Fold 3 Macro F1 Score: 0.791085613678203
+Fold 4 Macro F1 Score: 0.7891528146570779
+Fold 5 Macro F1 Score: 0.8096588881752658
+Average Macro F1 Score: 0.802076484094193
+
+개별과 평균 Macro F1스코어가 높아졌다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+Soft Voting을 활용한 Gradient Boosting과 LightGBM 앙상블 학습 및 Stratified K-Fold 교차 검증
+
+soft_train_x = scaled_train_x.copy()
+soft_train_y = train_y.copy()
+
+fold_num = 5 
+skf = StratifiedKFold(n_splits=fold_num, shuffle=True, random_state=42)
+
+gb_classifier = GradientBoostingClassifier(**gb_best_params)
+lgbm_classifier = lgb.LGBMClassifier(**lgbm_best_params)
+
+# 모델들을 VotingClassifier로 결합 (Soft voting)
+voting_classifier = VotingClassifier(
+    estimators=[('gb', gb_classifier), ('lgbm', lgbm_classifier)],
+    voting='soft'
+)
+
+macro_f1_scores = []
+
+for fold, (train_idx, valid_idx) in enumerate(skf.split(soft_train_x, soft_train_y)):
+    X_train_fold, X_valid_fold = soft_train_x.iloc[train_idx], soft_train_x.iloc[valid_idx]
+    y_train_fold, y_valid_fold = soft_train_y.iloc[train_idx], soft_train_y.iloc[valid_idx]
+
+    smote = BorderlineSMOTE(random_state=42)
+    X_train_smote, y_train_smote = smote.fit_resample(X_train_fold, y_train_fold)
+
+    voting_classifier.fit(X_train_smote, y_train_smote)
+    predictions = voting_classifier.predict(X_valid_fold)
+
+    macro_f1 = f1_score(y_valid_fold, predictions, average='macro')
+    macro_f1_scores.append(macro_f1)
+
+for fold, macro_f1 in enumerate(macro_f1_scores):
+    print(f"Fold {fold + 1} Macro F1 Score: {macro_f1}")
+
+avg_macro_f1 = np.mean(macro_f1_scores)
+print(f"Average Macro F1 Score: {avg_macro_f1}")
+
+------------------------------------------------
+
+Fold 1 Macro F1 Score: 0.8090827201042143
+Fold 2 Macro F1 Score: 0.8000127957688657
+Fold 3 Macro F1 Score: 0.7700248513030641
+Fold 4 Macro F1 Score: 0.7826189387325212
+Fold 5 Macro F1 Score: 0.8101531564334805
+Average Macro F1 Score: 0.7943784924684292
+
+Hard Voting은 예측의 확신도가 높은 경우에 효과적이며, Soft Voting은 확률 정보를 활용하여 더 세밀한 예측을 가능하게 한다.
+두 방식의 성능 차이는 매우 작으며, 어느 한쪽이 우월하다고 보기 힘들다.
+
+단순한 분류 문제일때(개별 모델의 클래스 결정만 반영 → 모델 성능이 비슷할 때 적합)는 Hard Voting, 세세한 조정이 필요한 경우(확률값을 반영하여 보다 정밀한 예측 가능 → 개별 모델의 확률값이 신뢰할 수 있을 때 적합)는 Soft Voting
+
+일반적으로 Soft가 더 나은 성능을 보이지만, 개별 모델의 확률값 신뢰도가 낮다면 Hard가 안정적일 수 있다.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+성능 최적화를 위한 모델 튜닝과 테스트 데이터 예측 및 결과 제출
+
+라이브러리 Import
+
+import numpy as np
+import warnings
+warnings.filterwarnings("ignore")
+
+import pandas as pd
+from sklearn.model_selection import StratifiedKFold
+from sklearn.metrics import f1_score
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.ensemble import VotingClassifier
+from sklearn.impute import SimpleImputer
+from sklearn.cluster import DBSCAN
+import optuna
+import lightgbm as lgb
+
+pd.set_option('mode.chained_assignment',  None)
+
+------------------------------------------------
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+피처 엔지니어링 및 국가 카테고리 함수 정의
+
+# 1. 피처 엔지니어링
+def preprocess_data(df, country_groups):
+
+    df['education'].replace(['Doctorate', 'Prof-school'],  'highEducation', inplace=True)
+    df['education'].replace(['Assoc-acdm', 'Assoc-voc'], 'SomeHigherEd', inplace=True)
+    df['education'].replace(['Preschool', '10th', '11th', '12th', '1st-4th', '5th-6th', '7th-8th', '9th'], 'LowEducation', inplace=True)
+
+    df['marital.status'].replace(['Never-married', 'Married-spouse-absent'], 'UnmarriedStatus', inplace=True)
+    df['marital.status'].replace(['Married-AF-spouse', 'Married-civ-spouse'], 'Married', inplace=True)
+    df['marital.status'].replace(['Separated', 'Divorced'], 'MarriageEnded', inplace=True)
+
+    df['age-hours'] = df['age'] * df['hours.per.week']
+    df['age'] = pd.cut(np.log(df['age']), 30)
+
+    for group in country_groups:
+        df['native.country'].replace(country_groups[group], group, inplace=True)
+
+    return df
+
+# 2. 국가 카테고리화 함수 정의
+def categorize_countries(df):
+    country_groups = {0: [], 1: [], 2: [], 3: [], 4: []}
+    for country in df['native.country'].unique():
+        education_data = df[df['native.country'] == country]['target']
+        proportion = sum(education_data) / education_data.count()
+        
+        if proportion == 0.0:
+            country_groups[0].append(country)
+        elif 0.0 < proportion <= 0.2:
+            country_groups[1].append(country)
+        elif 0.2 < proportion <= 0.4:
+            country_groups[2].append(country)
+        elif 0.4 < proportion <= 0.6:
+            country_groups[3].append(country)
+        else:
+            country_groups[4].append(country)
+    
+    return country_groups
+
+------------------------------------------------
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+결측치 처리 및 라벨 인코딩을 통한 데이터셋 준비 및 직업 예측 함수 정의
+
+# 1. 결측치 및 비결측치 직업 데이터 분리
+def split_missing_non_missing_occupation(df, occupation_col='occupation'):
+
+    null_occupation = df[df[occupation_col].isnull()]
+    notnull_occupation = df[~df[occupation_col].isnull()]
+    
+    return null_occupation, notnull_occupation
+
+# 2. 라벨 인코딩 함수 정의
+def label_encode_columns(df_with_occupation, df_missing_occupation, exclude_features, show_occupation_classes=None):
+    
+    encoded_non_missing_occupation = df_with_occupation.copy()
+    encoded_missing_occupation = df_missing_occupation.copy()
+    occupation_classes = None  # 기본값 설정
+
+    for col in list(encoded_missing_occupation.select_dtypes(['object', 'category']).columns):
+        if col in exclude_features:
+            continue
+
+        le = LabelEncoder()
+        encoded_non_missing_occupation[col] = le.fit_transform(encoded_non_missing_occupation[col])
+
+        if show_occupation_classes and col == 'occupation':
+            occupation_classes = le.classes_  # 직업 칼럼의 classes_ 추출
+
+        for label in np.unique(encoded_missing_occupation[col]):
+            if label not in le.classes_:
+                le.classes_ = np.append(le.classes_, label)
+
+        encoded_missing_occupation[col] = le.transform(encoded_missing_occupation[col])
+
+    return encoded_non_missing_occupation, encoded_missing_occupation, occupation_classes
+
+# 3. 데이터셋 준비 함수 정의
+def prepare_datasets(df_with_occupation, df_missing_occupation, exclude_features):
+    y_train = df_with_occupation['occupation']
+    x_train = df_with_occupation.drop(columns=exclude_features)
+
+    x_val = df_missing_occupation.drop(columns=exclude_features)
+    
+    return x_train, y_train, x_val
+
+# 4. 결측치 직업 예측 함수 정의
+def predict_missing_occupation(x_train, y_train, x_val, random_state=24):
+    rf = RandomForestClassifier(random_state=random_state)
+    rf.fit(x_train, y_train)
+    y_pred = rf.predict(x_val)
+    return y_pred
+
+# 5. 결측치 보간 함수 정의
+def impute_missing_values(train, valid, columns_to_impute):
+    imputed_train_data = train.copy()
+    imputed_valid_data = valid.copy()
+
+    imputer = SimpleImputer(strategy='most_frequent')
+    imputed_train_data[columns_to_impute] = imputer.fit_transform(imputed_train_data[columns_to_impute])
+    imputed_valid_data[columns_to_impute] = imputer.transform(imputed_valid_data[columns_to_impute])
+
+    return imputed_train_data, imputed_valid_data
+
+------------------------------------------------
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+DBSCAN 클러스터링을 통한 이상치 제거와 데이터 전처리, 피처 스케일링 함수 정의
+
+# 1. DBSCAN 클러스터링 및 전처리 함수 정의
+def preprocess_and_cluster(df, cluster_features):
+    df_copy = df.copy()
+    
+    X_sample_scaled = df_copy[cluster_features]
+
+    dbscan = DBSCAN(eps=0.5, min_samples=4)
+    clusters_sample = dbscan.fit_predict(X_sample_scaled)
+
+    df_copy['clusters'] = clusters_sample
+    df_no_outliers = df_copy[df_copy['clusters'] != -1]
+
+    return df_no_outliers
+
+# 2. 피처 스케일링 함수 정의
+def scale_features(train_data, valid_data, features):
+    scaler = StandardScaler()
+    
+    train_data_scaled = train_data.copy()
+    train_data_scaled[features] = scaler.fit_transform(train_data_scaled[features])
+
+    valid_data_scaled = valid_data.copy()
+    valid_data_scaled[features] = scaler.transform(valid_data_scaled[features])
+
+    return train_data_scaled, valid_data_scaled
+
+------------------------------------------------
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+occupation 피처 결측값 예측(train)
+
+train_origin = pd.read_csv('train.csv')
+test_origin = pd.read_csv('test.csv')
+
+country_groups = categorize_countries(train_origin)
+train_origin, test_origin = preprocess_data(train_origin, country_groups), preprocess_data(test_origin, country_groups)
+
+missing_occupation, non_missing_occupation = split_missing_non_missing_occupation(train_origin)
+encoding_exclude_features = ['workclass']
+encoded_non_missing_occupation, encoded_missing_occupation, occupation_classes = label_encode_columns(non_missing_occupation, missing_occupation, encoding_exclude_features, show_occupation_classes=True)
+
+exclude_features = ['occupation', 'workclass', 'ID']
+x_train, y_train, x_val = prepare_datasets(encoded_non_missing_occupation, encoded_missing_occupation, exclude_features)
+y_pred_real = predict_missing_occupation(x_train, y_train, x_val)
+missing_occupation['occupation'] = y_pred_real
+
+occupation_num_to_str = {index: occupation for index, occupation in enumerate(occupation_classes.tolist())}
+occupation_str_to_num = {string: num for num, string in occupation_num_to_str.items()}
+
+missing_occupation['occupation'] = missing_occupation['occupation'].map(occupation_num_to_str)
+
+------------------------------------------------
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+occupation 피처 결측값 예측(test)
+
+train_imputed_occupation = pd.concat([non_missing_occupation, missing_occupation])
+
+test_null_occupation, test_notnull_occupation = split_missing_non_missing_occupation(test_origin)
+
+encoded_non_missing_occupation, encoded_missing_occupation, occupation_classes = label_encode_columns(train_imputed_occupation, test_null_occupation, encoding_exclude_features, show_occupation_classes=False)
+
+exclude_features = ['occupation', 'workclass','ID']
+
+y_train = encoded_non_missing_occupation['occupation']
+x_train = encoded_non_missing_occupation.drop(columns=exclude_features + ['target'])
+x_val = encoded_missing_occupation.drop(columns=exclude_features)
+
+y_pred_real = predict_missing_occupation(x_train, y_train, x_val)
+
+test_null_occupation['occupation'] = y_pred_real
+test_null_occupation['occupation'] = test_null_occupation['occupation'].map(occupation_num_to_str)
+
+------------------------------------------------
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+SimpleImpute 기법으로 workclass 결측치 보간(train / test)
+
+test_null_occupation['occupation'] = y_pred_real
+test_null_occupation['occupation'] = test_null_occupation['occupation'].map(occupation_num_to_str)
+
+test_all = pd.concat([test_notnull_occupation,test_null_occupation]).sort_index()
+
+columns_to_impute = ['workclass']
+imputed_train_data, imputed_test_data = impute_missing_values(train_imputed_occupation, test_all, columns_to_impute)
+
+encoded_train, encoded_test, _ = label_encode_columns(imputed_train_data, imputed_test_data, exclude_features=[], show_occupation_classes=False)
+
+------------------------------------------------
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+이상치 제거(Dascan 기법)와 표준화(StandardScaler 활용)를 통한 데이터 전처리 (train / test)
+
+cluster_features = ['capital.gain', 'capital.loss']
+sample_no_outliers_train = preprocess_and_cluster(encoded_train, cluster_features)
+
+train_y = sample_no_outliers_train['target']
+train_x = sample_no_outliers_train.drop(['ID','target','education.num','clusters','fnlwgt'], axis=1)
+
+test_x = encoded_test.drop(['ID', 'education.num', 'fnlwgt'], axis = 1)
+
+scaled_train_x, scaled_test_x = scale_features(train_x, test_x, ['capital.gain', 'capital.loss', 'age-hours'])
+
+------------------------------------------------
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+Optuna를 활용한 앙상블 모델의 Hyperparameter 튜닝과 SMOTE 적용: Gradient Boosting 및 LightGBM
+
+def objective(trial, train_x, train_y, model_constructor, model_params):
+    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    macro_f1_scores = []
+
+    for train_idx, valid_idx in skf.split(train_x, train_y):
+        X_train_fold, X_valid_fold = train_x.iloc[train_idx], train_x.iloc[valid_idx]
+        y_train_fold, y_valid_fold = train_y.iloc[train_idx], train_y.iloc[valid_idx]
+
+        smote = BorderlineSMOTE(random_state=42)
+        X_train_smote, y_train_smote = smote.fit_resample(X_train_fold, y_train_fold)
+
+        model = model_constructor(**model_params(trial))
+        model.fit(X_train_smote, y_train_smote)
+        predictions = model.predict(X_valid_fold)
+
+        macro_f1 = f1_score(y_valid_fold, predictions, average='macro')
+        macro_f1_scores.append(macro_f1)
+
+    return np.mean(macro_f1_scores)
+
+# LightGBM과 Gradient Boosting의 하이퍼파라미터 설정 함수
+def lgbm_params(trial):
+    return {
+        'learning_rate': trial.suggest_loguniform('learning_rate', 0.01, 0.5),
+        'colsample_bytree': trial.suggest_uniform('colsample_bytree', 0.5, 1.0),
+        'n_estimators': 100,
+        'max_depth': trial.suggest_int('max_depth', 5, 20),
+        'num_leaves': trial.suggest_int('num_leaves', 20, 100),
+        'min_child_samples': trial.suggest_int('min_child_samples', 5, 100),
+        'reg_alpha': trial.suggest_loguniform('reg_alpha', 1e-5, 10.0),
+        'reg_lambda': trial.suggest_loguniform('reg_lambda', 1e-5, 10.0),
+        'verbose': -1
+    }
+
+def gbm_params(trial):
+    return {
+        'learning_rate': trial.suggest_loguniform('learning_rate', 0.01, 0.5),
+        'loss': trial.suggest_categorical('loss', ['log_loss', 'exponential']),
+        'max_depth': trial.suggest_int('max_depth', 1, 6),
+        'min_samples_leaf': 1,
+        'min_samples_split': 2,
+        'n_estimators': 100,
+        'subsample': 1.0,
+    }
+
+# LightGBM 최적 하이퍼파라미터 탐색
+study = optuna.create_study(direction='maximize')
+study.optimize(lambda trial: objective(trial, scaled_train_x, train_y, lgb.LGBMClassifier, lgbm_params), n_trials=5)
+lgbm_best_params = study.best_params
+
+# Gradient Boosting 최적 하이퍼파라미터 탐색
+study = optuna.create_study(direction='maximize')
+study.optimize(lambda trial: objective(trial, scaled_train_x, train_y, GradientBoostingClassifier, gbm_params), n_trials=5)
+gbm_best_params = study.best_params
+
+# LightGBM과 Gradient Boosting Classifier의 인스턴스 생성
+gb_classifier = GradientBoostingClassifier(**gbm_best_params)
+lgbm_classifier = lgb.LGBMClassifier(**lgbm_best_params)
+
+# 하드 보팅 앙상블 모델 구성
+best_classifier = VotingClassifier(
+    estimators=[('gb', gb_classifier), ('lgbm', lgbm_classifier)],
+    voting='hard'
+)
+
+smote = BorderlineSMOTE(random_state=42)
+X_train_smote, y_train_smote = smote.fit_resample(scaled_train_x, train_y)
+
+# 앙상블 모델 학습
+best_classifier.fit(X_train_smote, y_train_smote)
+
+# 테스트 데이터에 대한 예측 수행
+test_predictions = best_classifier.predict(scaled_test_x)
+
+# 테스트 데이터에 대한 예측 결과 출력
+print("테스트 데이터 예측 결과:", test_predictions)
+
+------------------------------------------------
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+모델 예측 결과를 제출용 CSV 파일로 저장
+
+submission = pd.read_csv('sample_submission.csv')
+submission['target'] = test_predictions
+
+submission.to_csv('submission.csv', index = False)
+
+
+
+
+
+
+
+
+
